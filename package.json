@@ -1,0 +1,12 @@
+{
+  "name": "gtt-network-diversity-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "serve -s . -l ${PORT:-3000}"
+  },
+  "dependencies": {
+    "serve": "^14.2.4"
+  }
+}
