@@ -4,7 +4,7 @@
 // persists and notifies in one place.
 
 import { useSyncExternalStore } from 'react'
-import { emptyState, migrate, makeEngagement, normalizeKey, uid } from './schema'
+import { emptyState, migrate, makeEngagement, makeSite, makeRegistryEntity, normalizeKey, registryId, uid } from './schema'
 
 const KEY = 'devarix.audit.v1'
 
@@ -70,6 +70,55 @@ export function renameEngagement(id, name, clientName) {
 
 export function selectEngagement(id) {
   update((s) => ({ ...s, active_engagement_id: id }))
+}
+
+// --- registry operations ---
+
+// Idempotent: registry ids are deterministic, so adding an existing
+// key returns the canonical entity instead of duplicating it.
+export function addRegistryEntity(kind, key, label, meta) {
+  const existing = getState().registry[kind].find((e) => e.id === registryId(kind, key))
+  if (existing) return existing
+  const entity = makeRegistryEntity(kind, key, label, meta)
+  update((s) => ({ ...s, registry: { ...s.registry, [kind]: [...s.registry[kind], entity] } }))
+  return entity
+}
+
+export function registryEntity(kind, id) {
+  return getState().registry[kind].find((e) => e.id === id) || null
+}
+
+// --- site & circuit operations (active engagement) ---
+
+function withActiveEngagement(s, fn) {
+  return { ...s, engagements: s.engagements.map((e) => (e.id === s.active_engagement_id ? fn(e) : e)) }
+}
+
+export function addSite(name, address) {
+  const site = makeSite(name, address)
+  update((s) => withActiveEngagement(s, (e) => ({ ...e, sites: [...e.sites, site] })))
+  return site
+}
+
+export function updateSite(siteId, fields) {
+  update((s) =>
+    withActiveEngagement(s, (e) => ({
+      ...e,
+      sites: e.sites.map((x) => (x.id === siteId ? { ...x, ...fields } : x)),
+    }))
+  )
+}
+
+export function saveCircuit(circuit) {
+  update((s) =>
+    withActiveEngagement(s, (e) => {
+      const exists = e.circuits.some((c) => c.id === circuit.id)
+      return {
+        ...e,
+        circuits: exists ? e.circuits.map((c) => (c.id === circuit.id ? circuit : c)) : [...e.circuits, circuit],
+      }
+    })
+  )
 }
 
 // --- export / import ---
