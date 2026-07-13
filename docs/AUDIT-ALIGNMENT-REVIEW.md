@@ -1,4 +1,4 @@
-# Audit Alignment Review — GTT Network Diversity Dashboard
+# Audit Alignment Review — Pathstead Network Diversity Dashboard
 
 **Review type:** Strategic alignment review (analysis only — no code changed)
 **Reviewed at:** commit `943bfcc` ("Add files via upload")
@@ -52,7 +52,7 @@ None. The Reports view is a catalog of four *described* report types plus one re
 ### Branding
 
 - **In-app brand is already neutral:** "PATHSTEAD / Network diversity assurance" (`App.jsx:31-32`), page title "Pathstead — Network Diversity Assurance" (`dev-source/index.html`).
-- **GTT appears in exactly three places, all repo-level:** the repository name, the top-level `README.md` title ("GTT Network Diversity Dashboard"), and the top-level `package.json` name (`gtt-network-diversity-dashboard`). Zero GTT references in application source.
+- **GTT appeared in exactly three places, all repo-level:** the repository name, the top-level `README.md` title, and the top-level `package.json` name. Zero GTT references in application source. *(Remediated after this review was written: the README title and package name were renamed to Pathstead in this same PR; the repository name itself can only be changed in GitHub Settings.)*
 - Carrier names in demo content are genericized ("Carrier one/two"), ASNs use private ranges (64512+).
 
 ### Storage approach
@@ -163,7 +163,7 @@ Required and absent: `verified_date` on every grade record, a per-layer or per-e
 
 ### 2.8 Branding neutrality — **PARTIAL** (better than the prompt assumed)
 
-Complete inventory of GTT-specific references:
+Complete inventory of GTT-specific references as found at review time (`943bfcc`):
 
 | # | Location | Reference | Decouple effort |
 |---|---|---|---|
@@ -175,7 +175,9 @@ That is the entire GTT footprint. The application itself ships a different brand
 
 **Effort to decouple into a config layer: Small.** A single `brandConfig` module (name, subtitle, page title, optionally palette tokens — `styles.css` already uses CSS variables throughout) consumed by `App.jsx` and injected into the HTML title covers 100% of in-app branding. The strategic fork (inside-GTT vs. independent) then reduces to one config file plus a repo rename. Per constraints, nothing was renamed.
 
-**Verdict: PARTIAL** — in-app branding is already neutral-but-hardcoded (Pathstead); no config layer exists; GTT references are confined to three repo-level strings.
+**Verdict: PARTIAL** — in-app branding is already neutral-but-hardcoded (Pathstead); no config layer exists; GTT references were confined to three repo-level strings.
+
+> **Remediation applied in this PR** (at the owner's direction, superseding the review's no-rename constraint): items 2 and 3 above were renamed to Pathstead (`README.md` title, root `package.json` name). Item 1 — the repository name `GTT-NETWORK-DIVERSITY-DASHBOARD` — is not controllable from code and must be renamed in GitHub → Settings; GitHub redirects the old URL after a rename. The compiled `index.html` bundle was verified to contain no GTT references, so no rebuild was needed. The P1-3 config layer remains open.
 
 ---
 
@@ -203,7 +205,7 @@ That is the entire GTT footprint. The application itself ships a different brand
 |---|---|---|---|---|---|---|
 | P1-1 | **Registry accumulation & carry-forward** | Export/import of the engagement-independent registry layer (canonical CLLIs, ASNs, vendors, NNIs, shared-fate assertions); on new engagement, import prior registry so known shared-fate hits auto-flag | `lib/store.js`, new `lib/registry.js`, cross-exam integration | **M** | P0-1, P0-4 | Each audit starts from zero; the compounding moat — the stated long-term asset — never compounds |
 | P1-2 | **Expiry / re-verification engine** | verified_date already captured in P0-3; add per-layer re-verification intervals, derived staleness, degradation of stale VERIFIED grades, and the expiry-queue view (the "Evidence audit / exceptions" report) | `lib/evidenceModel.js`, `views/Reports.jsx` or new queue view | **S/M** | P0-3 | Findings silently overstate confidence as they age; also forfeits the natural bridge into the monitoring subscription |
-| P1-3 | **Branding config layer** | Single `brandConfig` (name, subtitle, title, palette tokens) consumed by `App.jsx`/HTML title; neutralize the 3 repo-level GTT strings when the fork is decided | New `lib/brandConfig.js`, `App.jsx`, `dev-source/index.html`, root `README.md`/`package.json` | **S** | — | Low — footprint is 3 strings + 1 hardcoded brand name; but deciding the fork late with no config layer invites a rushed find-and-replace |
+| P1-3 | **Branding config layer** | Single `brandConfig` (name, subtitle, title, palette tokens) consumed by `App.jsx`/HTML title (repo-level GTT strings already renamed to Pathstead in this PR; repo rename pending in GitHub Settings) | New `lib/brandConfig.js`, `App.jsx`, `dev-source/index.html` | **S** | — | Low — remaining footprint is 1 hardcoded brand name; but deciding the fork late with no config layer invites a rushed find-and-replace |
 | P1-4 | **CLLI reference data import** | Replace the 10-entry `clliTable` with an importable/expandable dataset (paste/CSV into the registry) | `lib/circuitParser.js` → registry-backed lookup | **S** | P1-1 | Parser inference degrades to "CLLI not in local table" on nearly every real circuit, costing manual lookup time every intake |
 
 ### P2 — deferred to monitoring-subscription phase

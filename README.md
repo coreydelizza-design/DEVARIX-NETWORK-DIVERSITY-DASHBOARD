@@ -1,4 +1,4 @@
-# GTT Network Diversity Dashboard
+# Pathstead Network Diversity Dashboard
 
 Pre-built, self-contained deployment. The entire application lives in one file: `index.html`. There is no build step — Railway just serves it.
 
