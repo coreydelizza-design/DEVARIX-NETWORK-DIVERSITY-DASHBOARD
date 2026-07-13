@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Engagements from './views/Engagements'
 import Dashboard from './views/Dashboard'
 import Scorer from './views/Scorer'
 import SiteDetail from './views/SiteDetail'
@@ -7,6 +8,7 @@ import Tco from './views/Tco'
 import Reports from './views/Reports'
 
 const nav = [
+  ['engagements', 'Engagements'],
   ['dashboard', 'Portfolio'],
   ['scorer', 'Site scorer'],
   ['site', 'Site drill-down'],
@@ -46,6 +48,7 @@ export default function App() {
         </div>
       </aside>
       <main className="main">
+        {view === 'engagements' && <Engagements />}
         {view === 'dashboard' && <Dashboard openSite={openSite} />}
         {view === 'scorer' && <Scorer />}
         {view === 'site' && <SiteDetail site={activeSite} />}
