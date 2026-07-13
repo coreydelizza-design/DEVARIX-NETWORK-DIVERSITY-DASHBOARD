@@ -60,6 +60,81 @@ function ClliStatus({ registry, text }) {
   return <p className="small warn" style={{ margin: '2px 0 0' }}>Not a plausible CLLI format</p>
 }
 
+function TriState({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 6 }}>
+      {[['yes', 'Yes'], ['no', 'No'], ['unknown', 'Unknown']].map(([v, l]) => (
+        <button key={v} className={`btn ${value === v ? 'btn-primary' : ''}`} onClick={() => onChange(v)}>{l}</button>
+      ))}
+    </div>
+  )
+}
+
+const asnDigits = (t) => String(t || '').trim().toUpperCase().replace(/^AS/, '')
+
+function AsnPicker({ registry, text, onText }) {
+  const d = asnDigits(text)
+  const match = registry.asn.find((e) => e.key === d)
+  const valid = /^\d+$/.test(d)
+  return (
+    <div style={{ flex: 1, minWidth: 220 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input type="text" className="mono" list="asn-list" value={text} onChange={(e) => onText(e.target.value)} placeholder="e.g. 64801 or AS64801" style={{ flex: 1 }} />
+        <datalist id="asn-list">
+          {registry.asn.map((e) => (
+            <option key={e.id} value={e.label} />
+          ))}
+        </datalist>
+        {!match && valid && (
+          <button className="btn" onClick={() => { addRegistryEntity('asn', d, `AS${d}`); onText(`AS${d}`) }}>Add ASN</button>
+        )}
+      </div>
+      {d && !valid && <p className="small warn" style={{ margin: '2px 0 0' }}>ASN must be numeric</p>}
+      {match && <p className="small ok" style={{ margin: '2px 0 0' }}>{match.label} · in registry</p>}
+    </div>
+  )
+}
+
+function Section({ title, filled, total, open, onToggle, children }) {
+  return (
+    <div style={{ border: '1px solid var(--line)', borderRadius: 6, marginBottom: 8 }}>
+      <button
+        onClick={onToggle}
+        style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}
+      >
+        <span style={{ fontWeight: 600, fontSize: 13.5 }}>{title}</span>
+        <span className="small muted mono">{filled}/{total} fields {open ? '▾' : '▸'}</span>
+      </button>
+      {open && <div style={{ padding: '0 12px 12px' }}>{children}</div>}
+    </div>
+  )
+}
+
+// Per-layer completion from stored circuit data. Tri-state 'unknown' is
+// the default and counts as unfilled; the NNI layer only counts on
+// Type II loops.
+export function layerCompletion(c) {
+  const loop = c.layers.loop || {}
+  const type2 = loop.access_type === 'type2'
+  const defs = [
+    ['Identity', c.layers.identity, ['circuit_id', 'carrier_ref', 'service_type', 'access_medium', 'evidence_source']],
+    ['Loop', loop, type2 ? ['access_type', 'access_provider_ref', 'access_circuit_id', 'wire_center_ref', 'evidence_source'] : ['access_type', 'wire_center_ref', 'evidence_source']],
+    ['Entrance', c.layers.entrance, ['conduit', 'demarc', 'riser', 'power', 'evidence_source']],
+    ...(type2 ? [['NNI', c.layers.nni, ['nni_clli_ref', 'nni_id_ref', 'evidence_source']]] : []),
+    ['Route', c.layers.route, ['kmz_received', 'kmz_file_ref', 'overlap_segments', 'evidence_source']],
+    ['POP', c.layers.pop, ['pop_clli_ref', 'router_node', 'shelf_card_port', 'evidence_source']],
+    ['Logical', c.layers.logical, ['egress_asn_ref', 'bgp_multihoming', 'traceroute_divergence', 'evidence_source']],
+  ]
+  return defs.map(([label, layer, fields]) => ({
+    label,
+    filled: fields.filter((k) => {
+      const v = (layer || {})[k]
+      return v && v !== 'unknown'
+    }).length,
+    total: fields.length,
+  }))
+}
+
 const emptyForm = {
   circuitId: '',
   carrierText: '',
@@ -71,13 +146,40 @@ const emptyForm = {
   accessCircuitId: '',
   clliText: '',
   loopEvidence: '',
+  conduit: '',
+  demarc: '',
+  riser: '',
+  power: '',
+  entranceEvidence: '',
+  nniClli: '',
+  nniIdText: '',
+  nniEvidence: '',
+  kmzReceived: 'unknown',
+  kmzFileRef: '',
+  overlapSegments: '',
+  routeEvidence: '',
+  popClli: '',
+  routerNode: '',
+  shelfCardPort: '',
+  popEvidence: '',
+  asnText: '',
+  bgpMultihoming: 'unknown',
+  tracerouteDivergence: 'unknown',
+  logicalEvidence: '',
 }
 
 function CircuitForm({ registry, site, circuit, onDone }) {
   const [f, setF] = useState(() => {
     if (!circuit) return emptyForm
-    const id = circuit.layers.identity
-    const loop = circuit.layers.loop
+    // Missing layer fields default so feature-3-era circuits load cleanly.
+    const id = circuit.layers.identity || {}
+    const loop = circuit.layers.loop || {}
+    const ent = circuit.layers.entrance || {}
+    const nni = circuit.layers.nni || {}
+    const route = circuit.layers.route || {}
+    const pop = circuit.layers.pop || {}
+    const logical = circuit.layers.logical || {}
+    const clliKey = (ref) => (registry.clli.find((e) => e.id === ref) || {}).key || ''
     return {
       circuitId: id.circuit_id || '',
       carrierText: entityLabel(registry, 'carrier', id.carrier_ref),
@@ -87,13 +189,36 @@ function CircuitForm({ registry, site, circuit, onDone }) {
       accessType: loop.access_type || 'onnet',
       providerText: entityLabel(registry, 'accessVendor', loop.access_provider_ref),
       accessCircuitId: loop.access_circuit_id || '',
-      clliText: (registry.clli.find((e) => e.id === loop.wire_center_ref) || {}).key || '',
+      clliText: clliKey(loop.wire_center_ref),
       loopEvidence: loop.evidence_source || '',
+      conduit: ent.conduit || '',
+      demarc: ent.demarc || '',
+      riser: ent.riser || '',
+      power: ent.power || '',
+      entranceEvidence: ent.evidence_source || '',
+      nniClli: clliKey(nni.nni_clli_ref),
+      nniIdText: entityLabel(registry, 'nniId', nni.nni_id_ref),
+      nniEvidence: nni.evidence_source || '',
+      kmzReceived: route.kmz_received || 'unknown',
+      kmzFileRef: route.kmz_file_ref || '',
+      overlapSegments: route.overlap_segments || '',
+      routeEvidence: route.evidence_source || '',
+      popClli: clliKey(pop.pop_clli_ref),
+      routerNode: pop.router_node || '',
+      shelfCardPort: pop.shelf_card_port || '',
+      popEvidence: pop.evidence_source || '',
+      asnText: entityLabel(registry, 'asn', logical.egress_asn_ref),
+      bgpMultihoming: logical.bgp_multihoming || 'unknown',
+      tracerouteDivergence: logical.traceroute_divergence || 'unknown',
+      logicalEvidence: logical.evidence_source || '',
     }
   })
   const [parsed, setParsed] = useState(null)
   const [notice, setNotice] = useState('')
+  const [open, setOpen] = useState({ identity: true, loop: true })
   const set = (patch) => setF((prev) => ({ ...prev, ...patch }))
+  const toggle = (k) => setOpen((prev) => ({ ...prev, [k]: !prev[k] }))
+  const filled = (arr) => arr.filter(Boolean).length
 
   const onCircuitId = (v) => {
     const p = parseCircuitId(v)
@@ -102,18 +227,28 @@ function CircuitForm({ registry, site, circuit, onDone }) {
     set(p.valid ? { circuitId: v, clliText: p.aLoc.code.substring(0, 6) } : { circuitId: v })
   }
 
+  const resolveClli = (text) => {
+    const k = normalizeKey(text)
+    if (!k) return null
+    const ent = registry.clli.find((e) => e.key === k) || addRegistryEntity('clli', k, k)
+    return ent.id
+  }
+
   const save = () => {
     if (!f.circuitId.trim()) return setNotice('Circuit ID is required.')
     const carrier = resolveEntity(registry, 'carrier', f.carrierText)
     if (!carrier.ok) return setNotice('Carrier not in registry — use Add carrier to create it first.')
     const provider = f.accessType === 'type2' ? resolveEntity(registry, 'accessVendor', f.providerText) : { ok: true, ref: null }
     if (!provider.ok) return setNotice('Access provider not in registry — use Add vendor to create it first.')
+    const nniId = f.accessType === 'type2' ? resolveEntity(registry, 'nniId', f.nniIdText) : { ok: true, ref: null }
+    if (!nniId.ok) return setNotice('NNI ID not in registry — use Add NNI to create it first.')
 
-    let clliRef = null
-    const k = normalizeKey(f.clliText)
-    if (k) {
-      const ent = registry.clli.find((e) => e.key === k) || addRegistryEntity('clli', k, k)
-      clliRef = ent.id
+    let asnRef = null
+    const dAsn = asnDigits(f.asnText)
+    if (dAsn) {
+      if (!/^\d+$/.test(dAsn)) return setNotice('ASN must be numeric (e.g. 64801).')
+      const ent = registry.asn.find((e) => e.key === dAsn) || addRegistryEntity('asn', dAsn, `AS${dAsn}`)
+      asnRef = ent.id
     }
 
     const c = circuit || makeCircuit(site.id)
@@ -134,8 +269,42 @@ function CircuitForm({ registry, site, circuit, onDone }) {
           access_type: f.accessType,
           access_provider_ref: provider.ref,
           access_circuit_id: f.accessCircuitId.trim(),
-          wire_center_ref: clliRef,
+          wire_center_ref: resolveClli(f.clliText),
           evidence_source: f.loopEvidence.trim(),
+        },
+        entrance: {
+          ...c.layers.entrance,
+          conduit: f.conduit.trim(),
+          demarc: f.demarc.trim(),
+          riser: f.riser.trim(),
+          power: f.power.trim(),
+          evidence_source: f.entranceEvidence.trim(),
+        },
+        // NNI facts persist only for Type II; an on-net save preserves any
+        // previously captured values rather than discarding them.
+        nni: f.accessType === 'type2'
+          ? { ...c.layers.nni, nni_clli_ref: resolveClli(f.nniClli), nni_id_ref: nniId.ref, evidence_source: f.nniEvidence.trim() }
+          : c.layers.nni,
+        route: {
+          ...c.layers.route,
+          kmz_received: f.kmzReceived,
+          kmz_file_ref: f.kmzFileRef.trim(),
+          overlap_segments: f.overlapSegments.trim(),
+          evidence_source: f.routeEvidence.trim(),
+        },
+        pop: {
+          ...c.layers.pop,
+          pop_clli_ref: resolveClli(f.popClli),
+          router_node: f.routerNode.trim(),
+          shelf_card_port: f.shelfCardPort.trim(),
+          evidence_source: f.popEvidence.trim(),
+        },
+        logical: {
+          ...c.layers.logical,
+          egress_asn_ref: asnRef,
+          bgp_multihoming: f.bgpMultihoming,
+          traceroute_divergence: f.tracerouteDivergence,
+          evidence_source: f.logicalEvidence.trim(),
         },
       },
     }
@@ -147,84 +316,197 @@ function CircuitForm({ registry, site, circuit, onDone }) {
     <div className="card" style={{ background: 'var(--canvas)' }}>
       <p className="card-title">{circuit ? 'Edit circuit' : 'New circuit'} · {site.name}</p>
 
-      <p className="card-sub" style={{ marginTop: 10 }}>Identity layer</p>
-      <div className="crit-row">
-        <label className="crit-label">Circuit ID</label>
-        <input
-          type="text"
-          className="mono"
-          style={{ flex: 1, minWidth: 220 }}
-          value={f.circuitId}
-          onChange={(e) => onCircuitId(e.target.value)}
-          placeholder="Paste carrier circuit ID — CLCI formats auto-parse"
-        />
-      </div>
-      {parsed && (
-        <p className="small ok" style={{ margin: '0 0 6px 212px' }}>
-          {parsed.format} · {parsed.facility} · A: {parsed.aLoc.code} ({parsed.aLoc.place}) · Z: {parsed.zLoc.code} ({parsed.zLoc.place})
-        </p>
-      )}
-      <div className="crit-row">
-        <label className="crit-label">Carrier</label>
-        <RegistryPicker registry={registry} kind="carrier" listId={`carriers-${site.id}`} text={f.carrierText} onText={(v) => set({ carrierText: v })} addLabel="Add carrier" />
-      </div>
-      <div className="crit-row">
-        <label className="crit-label">Service type</label>
-        <select value={f.serviceType} onChange={(e) => set({ serviceType: e.target.value })}>
-          <option value="">Select service…</option>
-          {serviceTypes.map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
-      </div>
-      <div className="crit-row">
-        <label className="crit-label">Access medium</label>
-        <select value={f.medium} onChange={(e) => set({ medium: e.target.value })}>
-          <option value="">Select medium…</option>
-          {transportMediums.map((m) => (
-            <option key={m.id} value={m.id}>{m.label}</option>
-          ))}
-        </select>
-      </div>
-      <div className="crit-row">
-        <label className="crit-label">Identity evidence source</label>
-        <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.identityEvidence} onChange={(e) => set({ identityEvidence: e.target.value })} placeholder="e.g. carrier inventory export, invoice" />
-      </div>
+      <Section title="Identity" open={!!open.identity} onToggle={() => toggle('identity')}
+        filled={filled([f.circuitId, f.carrierText, f.serviceType, f.medium, f.identityEvidence])} total={5}>
+        <div className="crit-row">
+          <label className="crit-label">Circuit ID</label>
+          <input
+            type="text"
+            className="mono"
+            style={{ flex: 1, minWidth: 220 }}
+            value={f.circuitId}
+            onChange={(e) => onCircuitId(e.target.value)}
+            placeholder="Paste carrier circuit ID — CLCI formats auto-parse"
+          />
+        </div>
+        {parsed && (
+          <p className="small ok" style={{ margin: '0 0 6px' }}>
+            {parsed.format} · {parsed.facility} · A: {parsed.aLoc.code} ({parsed.aLoc.place}) · Z: {parsed.zLoc.code} ({parsed.zLoc.place})
+          </p>
+        )}
+        <div className="crit-row">
+          <label className="crit-label">Carrier</label>
+          <RegistryPicker registry={registry} kind="carrier" listId={`carriers-${site.id}`} text={f.carrierText} onText={(v) => set({ carrierText: v })} addLabel="Add carrier" />
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Service type</label>
+          <select value={f.serviceType} onChange={(e) => set({ serviceType: e.target.value })}>
+            <option value="">Select service…</option>
+            {serviceTypes.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Access medium</label>
+          <select value={f.medium} onChange={(e) => set({ medium: e.target.value })}>
+            <option value="">Select medium…</option>
+            {transportMediums.map((m) => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Identity evidence source</label>
+          <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.identityEvidence} onChange={(e) => set({ identityEvidence: e.target.value })} placeholder="e.g. carrier inventory export, invoice" />
+        </div>
+      </Section>
 
-      <p className="card-sub" style={{ marginTop: 14 }}>Local loop layer</p>
-      <div className="crit-row">
-        <label className="crit-label">Loop ownership</label>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {[['onnet', 'On-net'], ['type2', 'Type II (leased access)']].map(([v, l]) => (
-            <button key={v} className={`btn ${f.accessType === v ? 'btn-primary' : ''}`} onClick={() => set({ accessType: v })}>
-              {l}
-            </button>
-          ))}
+      <Section title="Local loop" open={!!open.loop} onToggle={() => toggle('loop')}
+        filled={filled(f.accessType === 'type2' ? [f.accessType, f.providerText, f.accessCircuitId, f.clliText, f.loopEvidence] : [f.accessType, f.clliText, f.loopEvidence])}
+        total={f.accessType === 'type2' ? 5 : 3}>
+        <div className="crit-row">
+          <label className="crit-label">Loop ownership</label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[['onnet', 'On-net'], ['type2', 'Type II (leased access)']].map(([v, l]) => (
+              <button key={v} className={`btn ${f.accessType === v ? 'btn-primary' : ''}`} onClick={() => set({ accessType: v })}>
+                {l}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+        {f.accessType === 'type2' && (
+          <>
+            <div className="crit-row">
+              <label className="crit-label">Access provider</label>
+              <RegistryPicker registry={registry} kind="accessVendor" listId={`vendors-${site.id}`} text={f.providerText} onText={(v) => set({ providerText: v })} addLabel="Add vendor" />
+            </div>
+            <div className="crit-row">
+              <label className="crit-label">Access circuit ID</label>
+              <input type="text" className="mono" style={{ flex: 1, minWidth: 220 }} value={f.accessCircuitId} onChange={(e) => set({ accessCircuitId: e.target.value })} placeholder="Underlying access provider circuit ID" />
+            </div>
+          </>
+        )}
+        <div className="crit-row">
+          <label className="crit-label">Serving wire center CLLI</label>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <input type="text" className="mono" style={{ width: '100%' }} value={f.clliText} onChange={(e) => set({ clliText: e.target.value.toUpperCase() })} placeholder="e.g. DNVRCO" />
+            <ClliStatus registry={registry} text={f.clliText} />
+          </div>
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Loop evidence source</label>
+          <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.loopEvidence} onChange={(e) => set({ loopEvidence: e.target.value })} placeholder="e.g. DLR, LOA/CFA response, KMZ" />
+        </div>
+      </Section>
+
+      <Section title="Building entrance" open={!!open.entrance} onToggle={() => toggle('entrance')}
+        filled={filled([f.conduit, f.demarc, f.riser, f.power, f.entranceEvidence])} total={5}>
+        <div className="crit-row">
+          <label className="crit-label">Conduit</label>
+          <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.conduit} onChange={(e) => set({ conduit: e.target.value })} placeholder="e.g. North vault, Race St conduit" />
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Demarc location</label>
+          <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.demarc} onChange={(e) => set({ demarc: e.target.value })} placeholder="e.g. MPOE room 014, rack B3" />
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Riser path</label>
+          <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.riser} onChange={(e) => set({ riser: e.target.value })} placeholder="e.g. East riser, floors 1-6" />
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Power feed</label>
+          <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.power} onChange={(e) => set({ power: e.target.value })} placeholder="e.g. A-feed only / A+B diverse" />
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Entrance evidence source</label>
+          <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.entranceEvidence} onChange={(e) => set({ entranceEvidence: e.target.value })} placeholder="e.g. site walk photos, building riser diagram" />
+        </div>
+      </Section>
+
       {f.accessType === 'type2' && (
-        <>
+        <Section title="NNI" open={!!open.nni} onToggle={() => toggle('nni')}
+          filled={filled([f.nniClli, f.nniIdText, f.nniEvidence])} total={3}>
           <div className="crit-row">
-            <label className="crit-label">Access provider</label>
-            <RegistryPicker registry={registry} kind="accessVendor" listId={`vendors-${site.id}`} text={f.providerText} onText={(v) => set({ providerText: v })} addLabel="Add vendor" />
+            <label className="crit-label">NNI location CLLI</label>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <input type="text" className="mono" style={{ width: '100%' }} value={f.nniClli} onChange={(e) => set({ nniClli: e.target.value.toUpperCase() })} placeholder="e.g. DNVRCOMA" />
+              <ClliStatus registry={registry} text={f.nniClli} />
+            </div>
           </div>
           <div className="crit-row">
-            <label className="crit-label">Access circuit ID</label>
-            <input type="text" className="mono" style={{ flex: 1, minWidth: 220 }} value={f.accessCircuitId} onChange={(e) => set({ accessCircuitId: e.target.value })} placeholder="Underlying access provider circuit ID" />
+            <label className="crit-label">NNI ID</label>
+            <RegistryPicker registry={registry} kind="nniId" listId={`nni-${site.id}`} text={f.nniIdText} onText={(v) => set({ nniIdText: v })} addLabel="Add NNI" />
           </div>
-        </>
+          <div className="crit-row">
+            <label className="crit-label">NNI evidence source</label>
+            <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.nniEvidence} onChange={(e) => set({ nniEvidence: e.target.value })} placeholder="e.g. carrier NNI records response" />
+          </div>
+        </Section>
       )}
-      <div className="crit-row">
-        <label className="crit-label">Serving wire center CLLI</label>
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <input type="text" className="mono" style={{ width: '100%' }} value={f.clliText} onChange={(e) => set({ clliText: e.target.value.toUpperCase() })} placeholder="e.g. DNVRCO" />
-          <ClliStatus registry={registry} text={f.clliText} />
+
+      <Section title="Route" open={!!open.route} onToggle={() => toggle('route')}
+        filled={filled([f.kmzReceived !== 'unknown', f.kmzFileRef, f.overlapSegments, f.routeEvidence])} total={4}>
+        <div className="crit-row">
+          <label className="crit-label">KMZ received</label>
+          <TriState value={f.kmzReceived} onChange={(v) => set({ kmzReceived: v })} />
         </div>
-      </div>
-      <div className="crit-row">
-        <label className="crit-label">Loop evidence source</label>
-        <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.loopEvidence} onChange={(e) => set({ loopEvidence: e.target.value })} placeholder="e.g. DLR, LOA/CFA response, KMZ" />
-      </div>
+        <div className="crit-row">
+          <label className="crit-label">KMZ file reference</label>
+          <input type="text" className="mono" style={{ flex: 1, minWidth: 220 }} value={f.kmzFileRef} onChange={(e) => set({ kmzFileRef: e.target.value })} placeholder="e.g. den014-carrierA-route.kmz · sha or share path" />
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Overlap segments found</label>
+          <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.overlapSegments} onChange={(e) => set({ overlapSegments: e.target.value })} placeholder="GIS overlay result — segments where routes share path" />
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Route evidence source</label>
+          <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.routeEvidence} onChange={(e) => set({ routeEvidence: e.target.value })} placeholder="e.g. carrier KMZ under NDA, GIS overlay report" />
+        </div>
+      </Section>
+
+      <Section title="POP / node" open={!!open.pop} onToggle={() => toggle('pop')}
+        filled={filled([f.popClli, f.routerNode, f.shelfCardPort, f.popEvidence])} total={4}>
+        <div className="crit-row">
+          <label className="crit-label">POP CLLI</label>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <input type="text" className="mono" style={{ width: '100%' }} value={f.popClli} onChange={(e) => set({ popClli: e.target.value.toUpperCase() })} placeholder="e.g. DNVRCOMA" />
+            <ClliStatus registry={registry} text={f.popClli} />
+          </div>
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Router / node</label>
+          <input type="text" className="mono" style={{ flex: 1, minWidth: 220 }} value={f.routerNode} onChange={(e) => set({ routerNode: e.target.value })} placeholder="e.g. den-edge-01" />
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Shelf / card / port</label>
+          <input type="text" className="mono" style={{ flex: 1, minWidth: 220 }} value={f.shelfCardPort} onChange={(e) => set({ shelfCardPort: e.target.value })} placeholder="e.g. shelf 2 / card 4 / port 12" />
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">POP evidence source</label>
+          <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.popEvidence} onChange={(e) => set({ popEvidence: e.target.value })} placeholder="e.g. carrier POP/node records response" />
+        </div>
+      </Section>
+
+      <Section title="Logical" open={!!open.logical} onToggle={() => toggle('logical')}
+        filled={filled([f.asnText, f.bgpMultihoming !== 'unknown', f.tracerouteDivergence !== 'unknown', f.logicalEvidence])} total={4}>
+        <div className="crit-row">
+          <label className="crit-label">Egress ASN observed</label>
+          <AsnPicker registry={registry} text={f.asnText} onText={(v) => set({ asnText: v })} />
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">BGP multihoming confirmed</label>
+          <TriState value={f.bgpMultihoming} onChange={(v) => set({ bgpMultihoming: v })} />
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Traceroute divergence observed</label>
+          <TriState value={f.tracerouteDivergence} onChange={(v) => set({ tracerouteDivergence: v })} />
+        </div>
+        <div className="crit-row">
+          <label className="crit-label">Logical evidence source</label>
+          <input type="text" style={{ flex: 1, minWidth: 220 }} value={f.logicalEvidence} onChange={(e) => set({ logicalEvidence: e.target.value })} placeholder="e.g. looking-glass capture, traceroute logs" />
+        </div>
+      </Section>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
         <button className="btn btn-primary" onClick={save}>Save circuit</button>
@@ -289,6 +571,9 @@ function SiteBlock({ registry, site, circuits }) {
                   {loop.access_type === 'type2' && `via ${entityLabel(registry, 'accessVendor', loop.access_provider_ref) || 'unknown provider'} · `}
                   wire center: {(registry.clli.find((e) => e.id === loop.wire_center_ref) || {}).key || 'unknown'}
                   {id.evidence_source || loop.evidence_source ? '' : ' · no evidence sources'}
+                </p>
+                <p className="small faint mono" style={{ margin: '2px 0 0', fontSize: 12 }}>
+                  {layerCompletion(c).map((l) => `${l.label} ${l.filled}/${l.total}`).join(' · ')}
                 </p>
               </div>
             )
