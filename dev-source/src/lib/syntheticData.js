@@ -1,4 +1,5 @@
 import { gradeOf } from './scoringModel'
+import { TODAY, agingBand } from './provenance'
 
 // Deterministic seeded RNG so the demo portfolio is stable across reloads.
 function rng(seed) {
@@ -70,6 +71,63 @@ function buildSites() {
 }
 
 export const sites = buildSites()
+
+// --- evidence facts (demo provenance layer) ---
+// A separate seeded RNG so adding facts leaves the existing site
+// scores, flags, and cities byte-identical.
+
+const factPool = [
+  'Access carrier separation',
+  'Local loop conduit path',
+  'Serving wire center assignment',
+  'Entrance facility separation',
+  'A+B power feed separation',
+  'Edge router redundancy',
+  'Backbone provider separation',
+  'NNI handoff mapping',
+  'Long-haul route KMZ',
+  'Cloud on-ramp redundancy',
+]
+
+const factCarriers = ['Carrier one', 'Carrier two', 'Carrier three']
+
+function dateDaysBeforeToday(days) {
+  const d = new Date(TODAY)
+  d.setDate(d.getDate() - days)
+  return d.toISOString().slice(0, 10)
+}
+
+function attachFacts(list) {
+  const r = rng(1337)
+  list.forEach((site) => {
+    const pool = factPool.slice()
+    const n = 6 + Math.floor(r() * 5)
+    const facts = []
+    for (let i = 0; i < n && pool.length; i++) {
+      const label = pool.splice(Math.floor(r() * pool.length), 1)[0]
+      const carrier = factCarriers[Math.floor(r() * 3)]
+      const sPick = r()
+      const status = sPick < 0.45 ? 'verified' : sPick < 0.75 ? 'documented' : sPick < 0.92 ? 'declared' : 'inferred'
+      const validityDays = [90, 180, 365][Math.floor(r() * 3)]
+      // Target roughly 55% fresh / 30% aging / 15% expired portfolio-wide;
+      // margins clear the band cutoffs by more than date-rounding error.
+      const bPick = r()
+      let age
+      if (bPick < 0.55) age = Math.floor(r() * 0.65 * validityDays)
+      else if (bPick < 0.85) age = Math.floor((0.72 + r() * 0.26) * validityDays)
+      else age = Math.floor((1.05 + r() * 0.7) * validityDays)
+      facts.push({ label, carrier, status, evidenceDate: dateDaysBeforeToday(age), validityDays })
+    }
+    site.facts = facts
+  })
+}
+attachFacts(sites)
+
+export function factBands() {
+  const counts = { fresh: 0, aging: 0, expired: 0 }
+  sites.forEach((s) => s.facts.forEach((f) => counts[agingBand(f)]++))
+  return counts
+}
 
 export function portfolioStats() {
   const counts = { res: 0, part: 0, exp: 0, crit: 0 }

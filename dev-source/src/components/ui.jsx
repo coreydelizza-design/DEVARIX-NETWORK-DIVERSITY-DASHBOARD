@@ -1,3 +1,12 @@
+import { ageInDays, effectiveStatus, agingBand } from '../lib/provenance'
+
+export function AgeBadge({ fact }) {
+  const band = agingBand(fact)
+  const pill = band === 'fresh' ? 'pill-teal' : band === 'aging' ? 'pill-amber' : 'pill-red'
+  const text = band === 'expired' ? `${effectiveStatus(fact)} · expired` : `${effectiveStatus(fact)} · ${ageInDays(fact.evidenceDate)}d`
+  return <span className={`pill ${pill}`}>{text}</span>
+}
+
 export function PageHead({ eyebrow, title, sub }) {
   return (
     <div className="page-head">

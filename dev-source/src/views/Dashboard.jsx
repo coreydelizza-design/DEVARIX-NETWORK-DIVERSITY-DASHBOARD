@@ -1,13 +1,20 @@
 import { useMemo, useState } from 'react'
-import { sites, portfolioStats, remediationPrograms } from '../lib/syntheticData'
+import { sites, portfolioStats, remediationPrograms, factBands } from '../lib/syntheticData'
 import { gradeMeta } from '../lib/scoringModel'
 import { PageHead, Metric, Pill, ScoreBar } from '../components/ui'
 
 const gradeOrder = ['crit', 'exp', 'part', 'res']
+const bandMeta = [
+  ['fresh', 'Fresh', '#0b7261'],
+  ['aging', 'Aging', '#c07f16'],
+  ['expired', 'Expired', '#a83228'],
+]
 
 export default function Dashboard({ openSite }) {
   const stats = useMemo(() => portfolioStats(), [])
   const programs = useMemo(() => remediationPrograms(5), [])
+  const bands = useMemo(() => factBands(), [])
+  const factTotal = bands.fresh + bands.aging + bands.expired
   const [region, setRegion] = useState('all')
   const [grade, setGrade] = useState('all')
   const [tier, setTier] = useState('all')
@@ -39,6 +46,7 @@ export default function Dashboard({ openSite }) {
         <Metric label="Portfolio avg score" value={stats.avg} />
         <Metric label="Critical sites" value={stats.critical} tone="var(--red)" />
         <Metric label="Open risk flags" value={stats.flags} />
+        <Metric label="Portfolio freshness" value={`${Math.round((bands.fresh / factTotal) * 100)}%`} />
       </div>
 
       <div style={{ marginBottom: 24 }}>
@@ -56,6 +64,27 @@ export default function Dashboard({ openSite }) {
             <span key={g}>
               <span className="legend-swatch" style={{ background: gradeMeta[g].color }} />
               {gradeMeta[g].label} ({stats.counts[g]})
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <div className="dist" style={{ height: 8 }}>
+          {bandMeta.map(([k, label, color]) => (
+            <div
+              key={k}
+              style={{ width: `${(bands[k] / factTotal) * 100}%`, background: color }}
+              title={`${label}: ${bands[k]} facts`}
+            />
+          ))}
+        </div>
+        <div className="legend">
+          <span style={{ fontWeight: 600 }}>Evidence freshness</span>
+          {bandMeta.map(([k, label, color]) => (
+            <span key={k}>
+              <span className="legend-swatch" style={{ background: color }} />
+              {label} ({bands[k]})
             </span>
           ))}
         </div>

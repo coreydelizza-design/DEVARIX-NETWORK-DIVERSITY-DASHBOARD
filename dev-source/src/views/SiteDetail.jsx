@@ -1,12 +1,14 @@
-import { PageHead, Pill } from '../components/ui'
+import { PageHead, Pill, AgeBadge } from '../components/ui'
 
+// Ledger assumptions carry a provenance fact (status, evidenceDate,
+// validityDays) so data age renders alongside the claim status.
 const assumptions = [
-  ['Two carriers means two physical paths', 'violated', 'Both PoPs sit in the same carrier hotel; a facility event is a common-mode failure', 'Site survey · Jun 2026'],
-  ['Different ASNs ride different long-haul fiber', 'unvalidated', 'Denver to Chicago segment may share leased conduit; KMZ route files not on file for circuit B', 'No evidence'],
-  ['Local loops are conduit-diverse', 'validated', 'Separate building entrances and street routes confirmed against carrier KMZ', 'KMZ pair · Mar 2026'],
-  ['Serving wire centers are distinct', 'validated', 'Curtis St and Capitol Hill COs confirmed from carrier inventory records', 'LOA/CFA · Mar 2026'],
-  ['Cloud on-ramp is redundant', 'violated', 'Single direct connect, landed in the same carrier hotel as both PoPs', 'Cross-connect record · Jun 2026'],
-  ['Failover is hitless under single-circuit loss', 'unvalidated', 'BGP failover designed but never exercised under load; last test predates router refresh', 'Test overdue'],
+  { text: 'Two carriers means two physical paths', status: 'violated', note: 'Both PoPs sit in the same carrier hotel; a facility event is a common-mode failure', fact: { label: 'PoP facility separation', carrier: 'Carrier one', status: 'documented', evidenceDate: '2026-06-08', validityDays: 365 } },
+  { text: 'Different ASNs ride different long-haul fiber', status: 'unvalidated', note: 'Denver to Chicago segment may share leased conduit; KMZ route files not on file for circuit B', fact: { label: 'Long-haul route KMZ', carrier: 'Carrier two', status: 'inferred', evidenceDate: '2026-01-15', validityDays: 180 } },
+  { text: 'Local loops are conduit-diverse', status: 'validated', note: 'Separate building entrances and street routes confirmed against carrier KMZ', fact: { label: 'Local loop conduit path', carrier: 'Carrier one', status: 'verified', evidenceDate: '2026-03-10', validityDays: 365 } },
+  { text: 'Serving wire centers are distinct', status: 'validated', note: 'Curtis St and Capitol Hill COs confirmed from carrier inventory records', fact: { label: 'Serving wire center assignment', carrier: 'Carrier one', status: 'verified', evidenceDate: '2026-03-10', validityDays: 180 } },
+  { text: 'Cloud on-ramp is redundant', status: 'violated', note: 'Single direct connect, landed in the same carrier hotel as both PoPs', fact: { label: 'Cloud on-ramp redundancy', carrier: 'Carrier two', status: 'documented', evidenceDate: '2026-06-20', validityDays: 365 } },
+  { text: 'Failover is hitless under single-circuit loss', status: 'unvalidated', note: 'BGP failover designed but never exercised under load; last test predates router refresh', fact: { label: 'Failover exercise record', carrier: 'Carrier one', status: 'declared', evidenceDate: '2025-11-02', validityDays: 180 } },
 ]
 
 const statusMeta = {
@@ -110,14 +112,17 @@ export default function SiteDetail({ site }) {
         <p className="card-title">Design assumption ledger</p>
         <p className="card-sub">Every diversity claim recorded as a testable assumption with evidence and expiry</p>
         <div className="row-list" style={{ border: '1px solid var(--line)' }}>
-          {assumptions.map(([text, status, note, evidence]) => (
-            <div key={text} className="row-item">
+          {assumptions.map((a) => (
+            <div key={a.text} className="row-item">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-                <span style={{ fontWeight: 600, fontSize: 14, flex: 1, minWidth: 220 }}>{text}</span>
-                <Pill kind={statusMeta[status].pill}>{statusMeta[status].label}</Pill>
+                <span style={{ fontWeight: 600, fontSize: 14, flex: 1, minWidth: 220 }}>{a.text}</span>
+                <Pill kind={statusMeta[a.status].pill}>{statusMeta[a.status].label}</Pill>
               </div>
-              <p className="small muted" style={{ margin: '4px 0 0' }}>{note}</p>
-              <p className="small faint mono" style={{ margin: '2px 0 0', fontSize: 12 }}>Evidence: {evidence}</p>
+              <p className="small muted" style={{ margin: '4px 0 0' }}>{a.note}</p>
+              <p className="small faint mono" style={{ margin: '4px 0 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <AgeBadge fact={a.fact} />
+                <span>evidence date {a.fact.evidenceDate} · validity window: {a.fact.validityDays}d</span>
+              </p>
             </div>
           ))}
         </div>
