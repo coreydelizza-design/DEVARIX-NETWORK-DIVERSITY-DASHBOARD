@@ -28,7 +28,7 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <p className="brand-name">PATHSTEAD</p>
+          <p className="brand-name">DEVARIX</p>
           <p className="brand-sub">Network diversity assurance</p>
         </div>
         {nav.map(([key, label], i) => (

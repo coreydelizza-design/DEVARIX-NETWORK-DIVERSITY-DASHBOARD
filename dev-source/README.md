@@ -1,4 +1,4 @@
-# Pathstead — Network Diversity Assurance Platform
+# DEVARIX — Network Diversity Assurance Platform
 
 A React + Vite application for scoring, reviewing, and funding network path diversity across a global enterprise. Demo build with synthetic data.
 

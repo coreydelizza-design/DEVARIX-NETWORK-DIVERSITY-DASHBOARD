@@ -1,4 +1,4 @@
-# Pathstead Network Diversity Dashboard
+# DEVARIX Network Diversity Dashboard
 
 Pre-built, self-contained deployment. The entire application lives in one file: `index.html`. There is no build step — Railway just serves it.
 
@@ -25,7 +25,7 @@ dev-source/     The editable source code — NOT needed for deployment
 
 ## Verifying it worked
 
-The Railway build log should be tiny — no "vite build", no "transforming modules". Just an npm install of the server and done. Open the domain and you'll see the PATHSTEAD sidebar with six views.
+The Railway build log should be tiny — no "vite build", no "transforming modules". Just an npm install of the server and done. Open the domain and you'll see the DEVARIX sidebar with six views.
 
 ## Making changes later
 
