@@ -16,8 +16,10 @@ export const model = [
         ['Validated diverse paths', 2, null],
       ]},
       { label: 'Access technology', opts: [
-        ['Same technology', 1, null],
-        ['Mixed media (fiber + wireless)', 2, null],
+        ['Same medium both circuits', 1, null],
+        ['Different wireline media', 2, null],
+        ['Wireline + wireless or satellite mix', 2, null],
+        ['Both satellite or both cellular', 0, 'Both circuits depend on the same wireless or satellite infrastructure class'],
       ]},
     ],
   },
