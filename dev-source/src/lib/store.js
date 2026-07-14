@@ -94,8 +94,8 @@ function withActiveEngagement(s, fn) {
   return { ...s, engagements: s.engagements.map((e) => (e.id === s.active_engagement_id ? fn(e) : e)) }
 }
 
-export function addSite(name, address) {
-  const site = makeSite(name, address)
+export function addSite(name, address, coords) {
+  const site = makeSite(name, address, coords)
   update((s) => withActiveEngagement(s, (e) => ({ ...e, sites: [...e.sites, site] })))
   return site
 }

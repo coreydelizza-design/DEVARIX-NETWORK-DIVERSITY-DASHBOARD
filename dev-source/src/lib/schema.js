@@ -68,8 +68,8 @@ export function makeEngagement(name, clientName) {
   }
 }
 
-export function makeSite(name, address) {
-  return { id: uid('site'), name: name || '', address: address || '' }
+export function makeSite(name, address, coords) {
+  return { id: uid('site'), name: name || '', address: address || '', coords: coords || '' }
 }
 
 // Circuit layer fields are defined by the intake feature; the factory

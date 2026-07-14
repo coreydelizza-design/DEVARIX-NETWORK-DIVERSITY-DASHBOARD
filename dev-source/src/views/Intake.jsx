@@ -169,7 +169,7 @@ const emptyForm = {
   logicalEvidence: '',
 }
 
-function CircuitForm({ registry, site, circuit, onDone }) {
+function CircuitForm({ registry, site, circuit, onDone, initialSection }) {
   const [f, setF] = useState(() => {
     if (!circuit) return emptyForm
     // Missing layer fields default so feature-3-era circuits load cleanly.
@@ -216,7 +216,7 @@ function CircuitForm({ registry, site, circuit, onDone }) {
   })
   const [parsed, setParsed] = useState(null)
   const [notice, setNotice] = useState('')
-  const [open, setOpen] = useState({ identity: true, loop: true })
+  const [open, setOpen] = useState({ identity: true, loop: true, ...(initialSection ? { [initialSection]: true } : {}) })
   const set = (patch) => setF((prev) => ({ ...prev, ...patch }))
   const toggle = (k) => setOpen((prev) => ({ ...prev, [k]: !prev[k] }))
   const filled = (arr) => arr.filter(Boolean).length
@@ -702,14 +702,35 @@ function PairCard({ registry, pair, circuits }) {
   )
 }
 
+const KMZ_CHIP = {
+  yes: { pill: 'pill-teal', label: 'KMZ ✓' },
+  no: { pill: 'pill-amber', label: 'KMZ —' },
+  unknown: { pill: 'pill-gray', label: 'KMZ ?' },
+}
+
 function SiteBlock({ registry, site, circuits, pairs }) {
   const [editing, setEditing] = useState(false)
-  const [fields, setFields] = useState({ name: site.name, address: site.address })
+  const [fields, setFields] = useState({ name: site.name, address: site.address, coords: site.coords || '' })
   const [formFor, setFormFor] = useState(null) // null | 'new' | circuit id
+  const [formSection, setFormSection] = useState(null)
   const [pairSel, setPairSel] = useState({ a: '', b: '' })
 
   const mediumLabel = (id) => (transportMediums.find((m) => m.id === id) || {}).label || ''
   const cidOf = (c) => c.layers.identity.circuit_id || c.id
+
+  const svcCounts = {}
+  circuits.forEach((c) => {
+    const svc = (c.layers.identity.service_type || '').split(' (')[0]
+    if (svc) svcCounts[svc] = (svcCounts[svc] || 0) + 1
+  })
+  const carriers = [...new Set(circuits.map((c) => entityLabel(registry, 'carrier', c.layers.identity.carrier_ref)).filter(Boolean))]
+  const servicesLine = circuits.length
+    ? [
+        `${circuits.length} circuit${circuits.length > 1 ? 's' : ''}`,
+        ...Object.entries(svcCounts).map(([svc, n]) => `${svc} ×${n}`),
+        carriers.join(', '),
+      ].filter(Boolean).join(' · ')
+    : ''
 
   const definePair = () => {
     if (!pairSel.a || !pairSel.b || pairSel.a === pairSel.b) return
@@ -723,6 +744,7 @@ function SiteBlock({ registry, site, circuits, pairs }) {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
           <input type="text" style={{ flex: 1, minWidth: 160 }} value={fields.name} onChange={(e) => setFields({ ...fields, name: e.target.value })} />
           <input type="text" style={{ flex: 2, minWidth: 220 }} value={fields.address} onChange={(e) => setFields({ ...fields, address: e.target.value })} />
+          <input type="text" className="mono" placeholder="Lat / long" style={{ flex: 1, minWidth: 140 }} value={fields.coords} onChange={(e) => setFields({ ...fields, coords: e.target.value })} />
           <button className="btn btn-primary" onClick={() => { updateSite(site.id, fields); setEditing(false) }}>Save</button>
           <button className="btn" onClick={() => setEditing(false)}>Cancel</button>
         </div>
@@ -730,11 +752,15 @@ function SiteBlock({ registry, site, circuits, pairs }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
           <div>
             <p className="card-title" style={{ margin: 0 }}>{site.name}</p>
-            <p className="small muted" style={{ margin: '2px 0 0' }}>{site.address || 'No address recorded'}</p>
+            <p className="small muted" style={{ margin: '2px 0 0' }}>
+              {site.address || 'No address recorded'}
+              {site.coords && <span className="mono" style={{ fontSize: 12 }}> · {site.coords}</span>}
+            </p>
+            {servicesLine && <p className="small faint" style={{ margin: '2px 0 0' }}>{servicesLine}</p>}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={() => { setFields({ name: site.name, address: site.address }); setEditing(true) }}>Edit site</button>
-            <button className="btn btn-primary" onClick={() => setFormFor('new')}>Add circuit</button>
+            <button className="btn" onClick={() => { setFields({ name: site.name, address: site.address, coords: site.coords || '' }); setEditing(true) }}>Edit site</button>
+            <button className="btn btn-primary" onClick={() => { setFormSection(null); setFormFor('new') }}>Add circuit</button>
           </div>
         </div>
       )}
@@ -754,7 +780,16 @@ function SiteBlock({ registry, site, circuits, pairs }) {
                     <Pill kind={loop.access_type === 'type2' ? 'pill-amber' : 'pill-blue'}>
                       {loop.access_type === 'type2' ? 'Type II' : 'On-net'}
                     </Pill>
-                    <button className="btn" style={{ padding: '5px 10px', fontSize: 13 }} onClick={() => setFormFor(c.id)}>Edit</button>
+                    <button
+                      title="Route / KMZ status — open the Route section"
+                      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                      onClick={() => { setFormSection('route'); setFormFor(c.id) }}
+                    >
+                      <Pill kind={KMZ_CHIP[(c.layers.route || {}).kmz_received || 'unknown'].pill}>
+                        {KMZ_CHIP[(c.layers.route || {}).kmz_received || 'unknown'].label}
+                      </Pill>
+                    </button>
+                    <button className="btn" style={{ padding: '5px 10px', fontSize: 13 }} onClick={() => { setFormSection(null); setFormFor(c.id) }}>Edit</button>
                   </div>
                 </div>
                 <p className="small muted" style={{ margin: '4px 0 0' }}>
@@ -777,10 +812,12 @@ function SiteBlock({ registry, site, circuits, pairs }) {
       {formFor && (
         <div style={{ marginTop: 12 }}>
           <CircuitForm
+            key={`${formFor}-${formSection || ''}`}
             registry={registry}
             site={site}
             circuit={formFor === 'new' ? null : circuits.find((c) => c.id === formFor)}
-            onDone={() => setFormFor(null)}
+            onDone={() => { setFormFor(null); setFormSection(null) }}
+            initialSection={formSection}
           />
         </div>
       )}
@@ -821,14 +858,16 @@ export default function Intake() {
   const eng = activeEngagement(s)
   const [siteName, setSiteName] = useState('')
   const [siteAddress, setSiteAddress] = useState('')
+  const [siteCoords, setSiteCoords] = useState('')
 
   if (!eng) return <DemoIntake />
 
   const addNewSite = () => {
     if (!siteName.trim()) return
-    addSite(siteName.trim(), siteAddress.trim())
+    addSite(siteName.trim(), siteAddress.trim(), siteCoords.trim())
     setSiteName('')
     setSiteAddress('')
+    setSiteCoords('')
   }
 
   return (
@@ -844,6 +883,7 @@ export default function Intake() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input type="text" placeholder="Site name (e.g. DEN-014 · Denver plant)" style={{ flex: 1, minWidth: 180 }} value={siteName} onChange={(e) => setSiteName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addNewSite()} />
           <input type="text" placeholder="Full street address" style={{ flex: 2, minWidth: 220 }} value={siteAddress} onChange={(e) => setSiteAddress(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addNewSite()} />
+          <input type="text" className="mono" placeholder="Lat / long (optional)" style={{ flex: 1, minWidth: 150 }} value={siteCoords} onChange={(e) => setSiteCoords(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addNewSite()} />
           <button className="btn btn-primary" onClick={addNewSite}>Add site</button>
         </div>
       </div>
