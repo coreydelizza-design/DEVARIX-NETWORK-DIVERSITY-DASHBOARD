@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { parseCircuitId } from '../lib/circuitParser'
-import { normalizeKey, makeCircuit, transportMediums, serviceTypes } from '../lib/schema'
-import { useStore, activeEngagement, addSite, updateSite, saveCircuit, addRegistryEntity } from '../lib/store'
+import { normalizeKey, makeCircuit, makePair, makeGrade, GRADES, LAYERS, transportMediums, serviceTypes } from '../lib/schema'
+import { useStore, activeEngagement, addSite, updateSite, saveCircuit, savePair, addRegistryEntity } from '../lib/store'
 import { PageHead, Pill } from '../components/ui'
 
 // Text -> canonical entity resolution. Values persist as registry entity
@@ -517,12 +517,147 @@ function CircuitForm({ registry, site, circuit, onDone }) {
   )
 }
 
-function SiteBlock({ registry, site, circuits }) {
+// --- circuit pairs & grade matrix ---
+
+const GRADE_ORDER = ['VERIFIED_DIVERSE', 'CLAIMED_UNVERIFIED', 'UNKNOWN', 'SHARED_FATE_CONFIRMED']
+const GRADE_COLORS = {
+  VERIFIED_DIVERSE: '#0b7261',
+  CLAIMED_UNVERIFIED: '#c07f16',
+  UNKNOWN: '#6b7280',
+  SHARED_FATE_CONFIRMED: '#a83228',
+}
+
+function layerSummary(registry, c, layerId) {
+  if (!c) return '—'
+  const L = c.layers[layerId] || {}
+  const clli = (ref) => (registry.clli.find((e) => e.id === ref) || {}).key || ''
+  const tri = (v, label) => (v && v !== 'unknown' ? `${label} ${v}` : '')
+  const parts = {
+    identity: [L.circuit_id, entityLabel(registry, 'carrier', L.carrier_ref), L.service_type],
+    loop: [L.access_type === 'type2' ? 'Type II' : L.access_type === 'onnet' ? 'On-net' : '', entityLabel(registry, 'accessVendor', L.access_provider_ref), clli(L.wire_center_ref)],
+    entrance: [L.conduit, L.demarc, L.power],
+    nni: [clli(L.nni_clli_ref), entityLabel(registry, 'nniId', L.nni_id_ref)],
+    route: [tri(L.kmz_received, 'KMZ'), L.overlap_segments],
+    pop: [clli(L.pop_clli_ref), L.router_node, L.shelf_card_port],
+    logical: [entityLabel(registry, 'asn', L.egress_asn_ref), tri(L.bgp_multihoming, 'BGP'), tri(L.traceroute_divergence, 'TR div')],
+  }[layerId] || []
+  return parts.filter(Boolean).join(' · ') || '—'
+}
+
+function GradeEditor({ layerLabel, existing, onSave, onCancel }) {
+  const [grade, setGrade] = useState(existing ? existing.grade : null)
+  const [evidenceRef, setEvidenceRef] = useState(existing ? existing.evidence_ref : '')
+  const [note, setNote] = useState(existing ? existing.confidence_note : '')
+  const [notice, setNotice] = useState('')
+
+  const save = () => {
+    if (!grade) return setNotice('Pick a grade.')
+    if (!evidenceRef.trim()) return setNotice('Evidence reference required — a grade without evidence is an attestation, not a finding.')
+    onSave(grade, evidenceRef.trim(), note.trim())
+  }
+
+  return (
+    <div style={{ background: 'var(--canvas)', borderRadius: 6, padding: '10px 12px', marginTop: 8 }}>
+      <p className="small" style={{ fontWeight: 600, margin: '0 0 8px' }}>Grade · {layerLabel}</p>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+        {GRADE_ORDER.map((g) => (
+          <button
+            key={g}
+            className="btn"
+            style={grade === g ? { background: GRADE_COLORS[g], borderColor: GRADE_COLORS[g], color: '#fff' } : undefined}
+            onClick={() => setGrade(g)}
+          >
+            {GRADES[g].label}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        <input type="text" style={{ flex: 2, minWidth: 220 }} value={evidenceRef} onChange={(e) => setEvidenceRef(e.target.value)} placeholder="Evidence reference (required) — e.g. DLR response 2026-07-02" />
+        <input type="text" style={{ flex: 2, minWidth: 220 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Confidence note (optional)" />
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button className="btn btn-primary" onClick={save}>Save grade</button>
+        <button className="btn" onClick={onCancel}>Cancel</button>
+        {notice && <span className="small danger">{notice}</span>}
+      </div>
+    </div>
+  )
+}
+
+function PairCard({ registry, pair, circuits }) {
+  const [editingLayer, setEditingLayer] = useState(null)
+  const a = circuits.find((c) => c.id === pair.circuit_a_id)
+  const b = circuits.find((c) => c.id === pair.circuit_b_id)
+  const cid = (c) => (c && c.layers.identity.circuit_id) || 'missing circuit'
+
+  const counts = { ungraded: 0 }
+  GRADE_ORDER.forEach((g) => { counts[g] = 0 })
+  LAYERS.forEach((l) => {
+    const g = pair.grades[l.id]
+    if (g) counts[g.grade]++
+    else counts.ungraded++
+  })
+
+  const saveGrade = (layerId, grade, evidenceRef, note) => {
+    savePair({ ...pair, grades: { ...pair.grades, [layerId]: makeGrade(grade, evidenceRef, note) } })
+    setEditingLayer(null)
+  }
+
+  return (
+    <div className="row-item">
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span className="mono" style={{ fontWeight: 600, fontSize: 13.5 }}>{cid(a)} × {cid(b)}</span>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {GRADE_ORDER.filter((g) => counts[g] > 0).map((g) => (
+            <Pill key={g} kind={GRADES[g].pill}>{counts[g]} {GRADES[g].label.toLowerCase()}</Pill>
+          ))}
+          {counts.ungraded > 0 && <span className="small faint">{counts.ungraded} ungraded</span>}
+        </div>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        {LAYERS.map((l) => {
+          const g = pair.grades[l.id]
+          return (
+            <div key={l.id} style={{ borderTop: '1px solid var(--line)', padding: '8px 0' }}>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ flex: '0 0 120px', fontWeight: 600, fontSize: 13 }}>{l.label}</span>
+                <span className="small muted" style={{ flex: 1, minWidth: 160 }}>A: {layerSummary(registry, a, l.id)}</span>
+                <span className="small muted" style={{ flex: 1, minWidth: 160 }}>B: {layerSummary(registry, b, l.id)}</span>
+                {g ? <Pill kind={GRADES[g.grade].pill}>{GRADES[g.grade].label}</Pill> : <span className="small faint">ungraded</span>}
+                <button className="btn" style={{ padding: '4px 10px', fontSize: 13 }} onClick={() => setEditingLayer(editingLayer === l.id ? null : l.id)}>
+                  {g ? 'Regrade' : 'Grade'}
+                </button>
+              </div>
+              {g && (
+                <p className="small faint mono" style={{ margin: '4px 0 0', fontSize: 12 }}>
+                  evidence: {g.evidence_ref} · verified {g.verified_date}{g.confidence_note ? ` · ${g.confidence_note}` : ''}
+                </p>
+              )}
+              {editingLayer === l.id && (
+                <GradeEditor layerLabel={l.label} existing={g} onSave={(gr, ev, nt) => saveGrade(l.id, gr, ev, nt)} onCancel={() => setEditingLayer(null)} />
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function SiteBlock({ registry, site, circuits, pairs }) {
   const [editing, setEditing] = useState(false)
   const [fields, setFields] = useState({ name: site.name, address: site.address })
   const [formFor, setFormFor] = useState(null) // null | 'new' | circuit id
+  const [pairSel, setPairSel] = useState({ a: '', b: '' })
 
   const mediumLabel = (id) => (transportMediums.find((m) => m.id === id) || {}).label || ''
+  const cidOf = (c) => c.layers.identity.circuit_id || c.id
+
+  const definePair = () => {
+    if (!pairSel.a || !pairSel.b || pairSel.a === pairSel.b) return
+    savePair(makePair(site.id, pairSel.a, pairSel.b))
+    setPairSel({ a: '', b: '' })
+  }
 
   return (
     <div className="card">
@@ -591,6 +726,34 @@ function SiteBlock({ registry, site, circuits }) {
           />
         </div>
       )}
+
+      {circuits.length >= 2 && (
+        <div style={{ marginTop: 16 }}>
+          <p className="card-sub" style={{ marginBottom: 8 }}>Circuit pairs · graded per layer with evidence</p>
+          {pairs.length > 0 && (
+            <div className="row-list" style={{ marginBottom: 10 }}>
+              {pairs.map((p) => (
+                <PairCard key={p.id} registry={registry} pair={p} circuits={circuits} />
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <select value={pairSel.a} onChange={(e) => setPairSel({ ...pairSel, a: e.target.value })}>
+              <option value="">Circuit A…</option>
+              {circuits.map((c) => (
+                <option key={c.id} value={c.id}>{cidOf(c)}</option>
+              ))}
+            </select>
+            <select value={pairSel.b} onChange={(e) => setPairSel({ ...pairSel, b: e.target.value })}>
+              <option value="">Circuit B…</option>
+              {circuits.filter((c) => c.id !== pairSel.a).map((c) => (
+                <option key={c.id} value={c.id}>{cidOf(c)}</option>
+              ))}
+            </select>
+            <button className="btn btn-primary" onClick={definePair} disabled={!pairSel.a || !pairSel.b}>Define pair</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -631,7 +794,13 @@ export default function Intake() {
         <p className="small muted">No sites yet — add the first site above to begin circuit intake.</p>
       ) : (
         eng.sites.map((site) => (
-          <SiteBlock key={site.id} registry={s.registry} site={site} circuits={eng.circuits.filter((c) => c.site_id === site.id)} />
+          <SiteBlock
+            key={site.id}
+            registry={s.registry}
+            site={site}
+            circuits={eng.circuits.filter((c) => c.site_id === site.id)}
+            pairs={eng.pairs.filter((p) => p.site_id === site.id)}
+          />
         ))
       )}
     </div>

@@ -121,6 +121,15 @@ export function saveCircuit(circuit) {
   )
 }
 
+export function savePair(pair) {
+  update((s) =>
+    withActiveEngagement(s, (e) => {
+      const exists = e.pairs.some((p) => p.id === pair.id)
+      return { ...e, pairs: exists ? e.pairs.map((p) => (p.id === pair.id ? pair : p)) : [...e.pairs, pair] }
+    })
+  )
+}
+
 // --- export / import ---
 
 // Full-engagement export: the engagement plus the entire registry, so the
