@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { parseCircuitId } from '../lib/circuitParser'
 import { normalizeKey, makeCircuit, makePair, makeGrade, GRADES, LAYERS, transportMediums, serviceTypes } from '../lib/schema'
 import { useStore, activeEngagement, addSite, updateSite, saveCircuit, savePair, addRegistryEntity } from '../lib/store'
+import { runChecks, manualHints } from '../lib/crossExam'
 import { PageHead, Pill } from '../components/ui'
 
 // Text -> canonical entity resolution. Values persist as registry entity
@@ -584,8 +585,23 @@ function GradeEditor({ layerLabel, existing, onSave, onCancel }) {
   )
 }
 
+const CHECK_RESULT_META = {
+  match: { pill: 'pill-red', label: 'shared-fate indicator' },
+  no_match: { pill: 'pill-teal', label: 'no match' },
+  insufficient_data: { pill: 'pill-gray', label: 'insufficient data' },
+  not_applicable: { pill: 'pill-gray', label: 'n/a — on-net' },
+}
+
+const HINT_META = {
+  review: { pill: 'pill-amber', label: 'review needed' },
+  info: { pill: 'pill-blue', label: 'info' },
+  insufficient: { pill: 'pill-gray', label: 'insufficient data' },
+}
+
 function PairCard({ registry, pair, circuits }) {
   const [editingLayer, setEditingLayer] = useState(null)
+  const [proposal, setProposal] = useState(null)
+  const [exam, setExam] = useState(null)
   const a = circuits.find((c) => c.id === pair.circuit_a_id)
   const b = circuits.find((c) => c.id === pair.circuit_b_id)
   const cid = (c) => (c && c.layers.identity.circuit_id) || 'missing circuit'
@@ -601,6 +617,12 @@ function PairCard({ registry, pair, circuits }) {
   const saveGrade = (layerId, grade, evidenceRef, note) => {
     savePair({ ...pair, grades: { ...pair.grades, [layerId]: makeGrade(grade, evidenceRef, note) } })
     setEditingLayer(null)
+    setProposal(null)
+  }
+
+  const propose = (chk) => {
+    setProposal({ layerId: chk.layer, grade: 'SHARED_FATE_CONFIRMED', evidence_ref: chk.evidence, confidence_note: '' })
+    setEditingLayer(chk.layer)
   }
 
   return (
@@ -612,8 +634,39 @@ function PairCard({ registry, pair, circuits }) {
             <Pill key={g} kind={GRADES[g].pill}>{counts[g]} {GRADES[g].label.toLowerCase()}</Pill>
           ))}
           {counts.ungraded > 0 && <span className="small faint">{counts.ungraded} ungraded</span>}
+          <button className="btn" style={{ padding: '4px 10px', fontSize: 13 }} onClick={() => setExam(exam ? null : { checks: runChecks(registry, pair, circuits), hints: manualHints(pair, circuits) })}>
+            {exam ? 'Hide cross-exam' : 'Run cross-exam'}
+          </button>
         </div>
       </div>
+
+      {exam && (
+        <div style={{ background: 'var(--canvas)', borderRadius: 6, padding: '10px 12px', marginTop: 8 }}>
+          <p className="small" style={{ fontWeight: 600, margin: '0 0 6px' }}>Cross-examination · automated checks on structured fields</p>
+          {exam.checks.map((chk) => (
+            <div key={chk.num} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', padding: '5px 0', borderTop: '1px solid var(--line)' }}>
+              <span className="small" style={{ flex: '0 0 190px', fontWeight: 600 }}>{chk.num}. {chk.name}</span>
+              <span className="small muted mono" style={{ flex: 1, minWidth: 160 }}>
+                {chk.result === 'not_applicable' ? '—' : `A: ${chk.a || '—'} · B: ${chk.b || '—'}`}
+              </span>
+              <Pill kind={CHECK_RESULT_META[chk.result].pill}>{CHECK_RESULT_META[chk.result].label}</Pill>
+              {chk.result === 'match' && (
+                <button className="btn" style={{ padding: '4px 10px', fontSize: 13 }} onClick={() => propose(chk)}>Propose grade</button>
+              )}
+            </div>
+          ))}
+          {exam.hints.map((h) => (
+            <div key={h.num} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', padding: '5px 0', borderTop: '1px solid var(--line)' }}>
+              <span className="small" style={{ flex: '0 0 190px', fontWeight: 600 }}>{h.num}. {h.name}</span>
+              <span className="small muted" style={{ flex: 1, minWidth: 160 }}>{h.text}</span>
+              <Pill kind={HINT_META[h.status].pill}>{HINT_META[h.status].label}</Pill>
+            </div>
+          ))}
+          <p className="small faint" style={{ margin: '6px 0 0' }}>
+            The engine proposes; the auditor saves. Matches pre-fill a SHARED_FATE_CONFIRMED grade — nothing is graded automatically.
+          </p>
+        </div>
+      )}
       <div style={{ marginTop: 8 }}>
         {LAYERS.map((l) => {
           const g = pair.grades[l.id]
@@ -634,7 +687,12 @@ function PairCard({ registry, pair, circuits }) {
                 </p>
               )}
               {editingLayer === l.id && (
-                <GradeEditor layerLabel={l.label} existing={g} onSave={(gr, ev, nt) => saveGrade(l.id, gr, ev, nt)} onCancel={() => setEditingLayer(null)} />
+                <GradeEditor
+                  layerLabel={l.label}
+                  existing={proposal && proposal.layerId === l.id ? proposal : g}
+                  onSave={(gr, ev, nt) => saveGrade(l.id, gr, ev, nt)}
+                  onCancel={() => { setEditingLayer(null); setProposal(null) }}
+                />
               )}
             </div>
           )
