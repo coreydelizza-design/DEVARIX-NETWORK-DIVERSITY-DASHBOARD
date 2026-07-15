@@ -15,7 +15,7 @@ const nav = [
   ['site', 'Site drill-down'],
   ['intake', 'Intake & validation'],
   ['tco', 'Outage TCO'],
-  ['reports', 'Reports'],
+  ['reports', 'Proof Center'],
   ['refresh', 'Refresh queue'],
 ]
 
