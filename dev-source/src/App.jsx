@@ -7,6 +7,7 @@ import Intake from './views/Intake'
 import Tco from './views/Tco'
 import Reports from './views/Reports'
 import RefreshQueue from './views/RefreshQueue'
+import FindingsReport from './views/FindingsReport'
 
 const nav = [
   ['engagements', 'Engagements'],
@@ -14,6 +15,7 @@ const nav = [
   ['scorer', 'Site scorer'],
   ['site', 'Site drill-down'],
   ['intake', 'Intake & validation'],
+  ['findings', 'Findings report'],
   ['tco', 'Outage TCO'],
   ['reports', 'Proof Center'],
   ['refresh', 'Refresh queue'],
@@ -55,6 +57,7 @@ export default function App() {
         {view === 'scorer' && <Scorer />}
         {view === 'site' && <SiteDetail site={activeSite} />}
         {view === 'intake' && <Intake />}
+        {view === 'findings' && <FindingsReport />}
         {view === 'tco' && <Tco />}
         {view === 'reports' && <Reports />}
         {view === 'refresh' && <RefreshQueue />}

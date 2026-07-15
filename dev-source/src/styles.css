@@ -174,3 +174,12 @@ button.btn-primary:hover { background: #095e50; }
   .main { padding: 20px 16px 48px; }
   .crit-label { flex-basis: 100%; }
 }
+
+@media print {
+  .sidebar, .no-print { display: none !important; }
+  .app { display: block; }
+  .main { padding: 0; max-width: none; overflow: visible; }
+  .report-doc { border: none; padding: 0; font-size: 12.5px; }
+  .print-section { break-inside: avoid; }
+  .pill { border: 1px solid var(--line-strong); }
+}

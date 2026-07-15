@@ -1,10 +1,6 @@
 import { useState } from 'react'
+import { computeTco, fk } from '../lib/tcoModel'
 import { PageHead, Metric } from '../components/ui'
-
-function fk(n) {
-  if (n >= 1000) return '$' + (n / 1000).toFixed(n >= 10000 ? 1 : 2) + 'M'
-  return '$' + Math.round(n) + 'k'
-}
 
 function Slider({ label, value, onChange, min, max, step, format }) {
   return (
@@ -26,12 +22,7 @@ export default function Tco() {
   const [opex, setOpex] = useState(36)
   const [red, setRed] = useState(70)
 
-  const perHr = rev + (emp * lc * 0.6) / 1000
-  const exposure = inc * dur * perHr
-  const avoided = exposure * (red / 100)
-  const netAnnual = avoided - opex
-  const months = netAnnual > 0 ? (capex / netAnnual) * 12 : null
-  const net3 = 3 * netAnnual - capex
+  const { exposure, avoided, netAnnual, months, net3 } = computeTco({ rev, inc, dur, emp, lc, capex, opex, red })
 
   let verdict
   if (netAnnual <= 0) {
