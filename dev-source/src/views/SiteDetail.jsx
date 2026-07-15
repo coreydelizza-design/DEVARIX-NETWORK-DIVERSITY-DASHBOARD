@@ -1,4 +1,73 @@
 import { PageHead, Pill, AgeBadge } from '../components/ui'
+import { model } from '../lib/scoringModel'
+import { REQUIREMENTS, FACT_DOMAINS, TIER_META } from '../lib/tierModel'
+import { PROVENANCE, effectiveStatus, ageInDays } from '../lib/provenance'
+
+function RubricSection({ site }) {
+  const assessed = site && site.tierAssignment && site.posture && site.facts && site.facts.length > 0
+  if (!assessed) {
+    return (
+      <div className="card">
+        <p className="card-title">Conformance rubric</p>
+        <p className="small muted" style={{ margin: 0 }}>
+          Not assessed — this site is missing a tier assignment or captured evidence, so no rubric applies.
+        </p>
+      </div>
+    )
+  }
+  const tier = site.tierAssignment.tier
+  const reqs = REQUIREMENTS[tier]
+  const rank = (p) => PROVENANCE.indexOf(p)
+  const meets = (sel, minArr) => minArr.every((m, i) => sel[i] >= m)
+
+  return (
+    <div className="card">
+      <p className="card-title">Conformance rubric</p>
+      <p className="card-sub">
+        {tier} · {TIER_META[tier].name} — {TIER_META[tier].blurb}. Assigned {site.tierAssignment.assignedDate} ({site.tierAssignment.assignedBy}).
+      </p>
+      {model.map((d, di) => {
+        const req = reqs[di]
+        if (!req.applicable) {
+          return (
+            <div key={d.name} className="rubric-row-na" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', padding: '7px 0', borderTop: '1px solid var(--line)' }}>
+              <span className="small" style={{ flex: '0 0 170px', fontWeight: 600 }}>{d.name}</span>
+              <span className="small" style={{ flex: 1 }}>N/A for {tier} — excluded from conformance math</span>
+            </div>
+          )
+        }
+        const sel = site.posture[di]
+        const reqParts = []
+        req.minPosture.forEach((m, ci) => { if (m > 0) reqParts.push(d.criteria[ci].opts[m][0]) })
+        if (req.anyOf) {
+          reqParts.push('one of: ' + req.anyOf.map((alt) => alt.map((m, ci) => (m > 0 ? d.criteria[ci].opts[m][0] : null)).filter(Boolean).join(' + ')).join(' / '))
+        }
+        const relevant = d.criteria.map((c, ci) => (req.minPosture[ci] > 0 || (req.anyOf && req.anyOf.some((alt) => alt[ci] > 0)) ? c.opts[sel[ci]][0] : null)).filter(Boolean)
+        const postureOk = meets(sel, req.minPosture) && (!req.anyOf || req.anyOf.some((alt) => meets(sel, alt)))
+        const facts = site.facts.filter((f) => FACT_DOMAINS[f.label] === d.name)
+        const best = facts.slice().sort((a, b) => rank(effectiveStatus(b)) - rank(effectiveStatus(a)) || ageInDays(a.evidenceDate) - ageInDays(b.evidenceDate))[0]
+        const provOk = best && rank(effectiveStatus(best)) >= rank(req.requiredProvenance)
+        const freshOk = best && ageInDays(best.evidenceDate) <= req.freshnessDays
+        const result = !postureOk ? 'failed: posture' : !provOk ? 'failed: provenance' : !freshOk ? 'failed: freshness' : 'met'
+        return (
+          <div key={d.name} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', padding: '7px 0', borderTop: '1px solid var(--line)' }}>
+            <span className="small" style={{ flex: '0 0 170px', fontWeight: 600 }}>{d.name}</span>
+            <span className="small muted" style={{ flex: 2, minWidth: 180 }}>
+              {(reqParts.join(' + ') || 'any posture')} · evidence ≥ {req.requiredProvenance}, ≤ {req.freshnessDays}d
+            </span>
+            <span className="small muted" style={{ flex: 1, minWidth: 130 }}>{relevant.join(' · ') || 'posture accepted'}</span>
+            <span style={{ flex: '0 0 175px', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              {best ? <AgeBadge fact={best} /> : <span className="small faint">no evidence</span>}
+            </span>
+            <span className="small" style={{ flex: '0 0 130px', fontWeight: 600, color: result === 'met' ? 'var(--teal, #0b7261)' : 'var(--red)' }}>
+              {result}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 // Ledger assumptions carry a provenance fact (status, evidenceDate,
 // validityDays) so data age renders alongside the claim status.
@@ -107,6 +176,8 @@ export default function SiteDetail({ site }) {
           AS paths are fully diverse, but both circuits terminate in one building. A facility event at the carrier hotel takes down both paths.
         </p>
       </div>
+
+      <RubricSection site={site} />
 
       <div className="card">
         <p className="card-title">Design assumption ledger</p>

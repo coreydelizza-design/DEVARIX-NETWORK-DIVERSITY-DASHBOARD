@@ -1,69 +1,80 @@
 import { useMemo, useState } from 'react'
-import { sites, portfolioStats, remediationPrograms, factBands } from '../lib/syntheticData'
+import { sites, remediationPrograms, factBands } from '../lib/syntheticData'
 import { gradeMeta } from '../lib/scoringModel'
-import { PageHead, Metric, Pill, ScoreBar } from '../components/ui'
+import { computeConformance, conformanceRate, VERDICTS, VERDICT_ORDER } from '../lib/conformance'
+import SiteCard from '../components/SiteCard'
+import { PageHead, Metric } from '../components/ui'
 
 const gradeOrder = ['crit', 'exp', 'part', 'res']
-const bandMeta = [
-  ['fresh', 'Fresh', '#0b7261'],
-  ['aging', 'Aging', '#c07f16'],
-  ['expired', 'Expired', '#a83228'],
-]
+// The measurement distribution renders neutrally — color encodes the
+// verdict, never the raw score.
+const GRADE_NEUTRALS = { crit: '#3f4650', exp: '#6b7280', part: '#9aa1a9', res: '#cdd2d8' }
+const VERDICT_DISPLAY = ['Conformant', 'Conformant · at risk', 'Nonconformant', 'Over-provisioned', 'Not assessed']
 
 export default function Dashboard({ openSite }) {
-  const stats = useMemo(() => portfolioStats(), [])
-  const programs = useMemo(() => remediationPrograms(5), [])
+  const judged = useMemo(() => sites.map((site) => ({ site, c: computeConformance(site) })), [])
+  const rate = useMemo(() => conformanceRate(sites), [])
   const bands = useMemo(() => factBands(), [])
-  const factTotal = bands.fresh + bands.aging + bands.expired
   const [region, setRegion] = useState('all')
-  const [grade, setGrade] = useState('all')
-  const [tier, setTier] = useState('all')
+  const [verdict, setVerdict] = useState('all')
+  const [fn, setFn] = useState('all')
 
-  const filtered = useMemo(() => {
-    return sites
-      .filter(
-        (s) =>
-          (region === 'all' || s.region === region) &&
-          (grade === 'all' || s.grade === grade) &&
-          (tier === 'all' || s.tier === tier)
-      )
-      .sort((a, b) => a.score - b.score)
-  }, [region, grade, tier])
+  const counts = {}
+  VERDICT_DISPLAY.forEach((v) => { counts[v] = 0 })
+  judged.forEach(({ c }) => { counts[c.verdict]++ })
+  const assessedCount = sites.length - counts['Not assessed']
+  const factTotal = bands.fresh + bands.aging + bands.expired
+  const freshPct = Math.round((bands.fresh / factTotal) * 100)
 
-  const shown = filtered.slice(0, 12)
+  const gradeCounts = { crit: 0, exp: 0, part: 0, res: 0 }
+  sites.forEach((s) => { gradeCounts[s.grade]++ })
+
+  const programs = useMemo(() => remediationPrograms(5), [])
   const maxImpact = programs.length ? programs[0].impact : 1
+
+  const filtered = judged
+    .filter(({ site, c }) =>
+      (region === 'all' || site.region === region) &&
+      (fn === 'all' || site.tier === fn) &&
+      (verdict === 'all' || c.verdict === verdict)
+    )
+    .sort((a, b) => {
+      const d = VERDICT_ORDER.indexOf(a.c.verdict) - VERDICT_ORDER.indexOf(b.c.verdict)
+      if (d !== 0) return d
+      if (a.c.verdict === 'Conformant · at risk') {
+        const ea = a.c.soonestExpiry ? a.c.soonestExpiry.days : 1e9
+        const eb = b.c.soonestExpiry ? b.c.soonestExpiry.days : 1e9
+        return ea - eb
+      }
+      return a.site.score - b.site.score
+    })
 
   return (
     <div>
       <PageHead
         eyebrow="Portfolio review"
-        title="Global diversity portfolio"
-        sub="Every site scored on the same weighted model. Review runs worst-first; remediation rolls up into fundable programs."
+        title="Portfolio conformance"
+        sub="Every site is measured on the same weighted model, then judged against its resilience tier. The score is the measurement; the verdict is the judgment."
       />
 
       <div className="metric-grid">
-        <Metric label="Sites assessed" value={stats.total} />
-        <Metric label="Portfolio avg score" value={stats.avg} />
-        <Metric label="Critical sites" value={stats.critical} tone="var(--red)" />
-        <Metric label="Open risk flags" value={stats.flags} />
-        <Metric label="Portfolio freshness" value={`${Math.round((bands.fresh / factTotal) * 100)}%`} />
+        <Metric label="Conformance rate" value={`${rate}%`} />
+        <Metric label="Sites assessed" value={assessedCount} />
+        <Metric label="Nonconformant sites" value={counts.Nonconformant} tone="var(--red)" />
+        <Metric label="Evidence fresh %" value={`${freshPct}%`} />
       </div>
 
-      <div style={{ marginBottom: 24 }}>
+      <div style={{ marginBottom: 16 }}>
         <div className="dist">
-          {gradeOrder.map((g) => (
-            <div
-              key={g}
-              style={{ width: `${(stats.counts[g] / stats.total) * 100}%`, background: gradeMeta[g].color }}
-              title={`${gradeMeta[g].label}: ${stats.counts[g]}`}
-            />
+          {VERDICT_DISPLAY.map((v) => (
+            <div key={v} style={{ width: `${(counts[v] / sites.length) * 100}%`, background: VERDICTS[v].color }} title={`${v}: ${counts[v]}`} />
           ))}
         </div>
         <div className="legend">
-          {gradeOrder.map((g) => (
-            <span key={g}>
-              <span className="legend-swatch" style={{ background: gradeMeta[g].color }} />
-              {gradeMeta[g].label} ({stats.counts[g]})
+          {VERDICT_DISPLAY.map((v) => (
+            <span key={v}>
+              <span className="legend-swatch" style={{ background: VERDICTS[v].color }} />
+              {v} ({counts[v]})
             </span>
           ))}
         </div>
@@ -71,20 +82,16 @@ export default function Dashboard({ openSite }) {
 
       <div style={{ marginBottom: 24 }}>
         <div className="dist" style={{ height: 8 }}>
-          {bandMeta.map(([k, label, color]) => (
-            <div
-              key={k}
-              style={{ width: `${(bands[k] / factTotal) * 100}%`, background: color }}
-              title={`${label}: ${bands[k]} facts`}
-            />
+          {gradeOrder.map((g) => (
+            <div key={g} style={{ width: `${(gradeCounts[g] / sites.length) * 100}%`, background: GRADE_NEUTRALS[g] }} title={`${gradeMeta[g].label}: ${gradeCounts[g]}`} />
           ))}
         </div>
         <div className="legend">
-          <span style={{ fontWeight: 600 }}>Evidence freshness</span>
-          {bandMeta.map(([k, label, color]) => (
-            <span key={k}>
-              <span className="legend-swatch" style={{ background: color }} />
-              {label} ({bands[k]})
+          <span style={{ fontWeight: 600 }}>Measurement distribution (diversity score)</span>
+          {gradeOrder.map((g) => (
+            <span key={g}>
+              <span className="legend-swatch" style={{ background: GRADE_NEUTRALS[g] }} />
+              {gradeMeta[g].label} ({gradeCounts[g]})
             </span>
           ))}
         </div>
@@ -98,43 +105,25 @@ export default function Dashboard({ openSite }) {
           <option>APAC</option>
           <option>LATAM</option>
         </select>
-        <select value={grade} onChange={(e) => setGrade(e.target.value)}>
-          <option value="all">All ratings</option>
-          <option value="crit">Critical only</option>
-          <option value="exp">Exposed only</option>
-          <option value="part">Partially diverse</option>
-          <option value="res">Resilient</option>
+        <select value={verdict} onChange={(e) => setVerdict(e.target.value)}>
+          <option value="all">All verdicts</option>
+          {VERDICT_DISPLAY.map((v) => (
+            <option key={v} value={v}>{v}</option>
+          ))}
         </select>
-        <select value={tier} onChange={(e) => setTier(e.target.value)}>
-          <option value="all">All site tiers</option>
+        <select value={fn} onChange={(e) => setFn(e.target.value)}>
+          <option value="all">All site functions</option>
           <option>Data center</option>
           <option>Regional hub</option>
           <option>Plant</option>
           <option>Branch</option>
         </select>
-        <span className="small faint">Showing worst {shown.length} of {filtered.length} sites</span>
+        <span className="small faint">Showing {filtered.length} of {sites.length} sites</span>
       </div>
 
-      <div className="row-list" style={{ marginBottom: 28 }}>
-        {shown.map((s) => (
-          <div key={s.id} className="row-item">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-              <div style={{ flex: '0 0 170px' }}>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>
-                  {s.city} <span className="mono faint" style={{ fontWeight: 400, fontSize: 12 }}>{s.id}</span>
-                </div>
-                <div className="small muted">{s.region} · {s.tier}</div>
-              </div>
-              <ScoreBar score={s.score} color={gradeMeta[s.grade].color} />
-              <Pill kind={gradeMeta[s.grade].pill}>{gradeMeta[s.grade].label}</Pill>
-              <button className="btn" style={{ padding: '5px 10px', fontSize: 13 }} onClick={() => openSite(s)}>
-                Open
-              </button>
-            </div>
-            <div className="small muted" style={{ marginTop: 6 }}>
-              {s.flags.length} flags · top risk: {s.flags[0] ? s.flags[0][0] : 'none'}
-            </div>
-          </div>
+      <div className="site-grid">
+        {filtered.map(({ site, c }) => (
+          <SiteCard key={site.id} site={site} conformance={c} onOpen={() => openSite(site)} />
         ))}
       </div>
 

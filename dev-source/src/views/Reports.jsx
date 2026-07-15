@@ -3,6 +3,7 @@ import { TODAY, ageInDays } from '../lib/provenance'
 import { PROOF_ITEMS, DECLARED_DATES } from '../lib/proofModel'
 import { gapEntries, gapStats } from '../lib/gapData'
 import { concentrationFindings } from '../lib/concentration'
+import { conformanceRate } from '../lib/conformance'
 import { PageHead, Metric, Pill, AgeBadge } from '../components/ui'
 
 const COVERAGE_PILL = {
@@ -124,9 +125,9 @@ export default function Reports() {
 
       <div className="card">
         <p className="card-title">Executive scorecard</p>
-        <p className="card-sub">No conformance tier data exists in this build — the portfolio average diversity score is shown in its place, labeled as such</p>
+        <p className="card-sub">Conformance rate computed from resilience tiers (posture + provenance + freshness per applicable domain)</p>
         <div className="metric-grid">
-          <Metric label="Portfolio avg score" value={stats.avg} />
+          <Metric label="Conformance rate" value={`${conformanceRate(sites)}%`} />
           <Metric label="Portfolio freshness" value={`${freshnessPct}%`} />
           <Metric label="Concentration findings" value={concentrationFindings.length} tone="var(--red)" />
           <Metric label="Overdue gaps" value={gs.overdue} tone="var(--red)" />
