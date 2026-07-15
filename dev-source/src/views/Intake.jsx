@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { parseCircuitId } from '../lib/circuitParser'
-import { normalizeKey, makeCircuit, makePair, makeGrade, GRADES, LAYERS, transportMediums, serviceTypes } from '../lib/schema'
+import { normalizeKey, makeCircuit, makePair, makeGrade, GRADES, LAYERS, ASK_LIST, transportMediums, serviceTypes } from '../lib/schema'
 import { useStore, activeEngagement, addSite, updateSite, saveCircuit, savePair, addRegistryEntity } from '../lib/store'
 import { runChecks, manualHints } from '../lib/crossExam'
 import { PageHead, Pill } from '../components/ui'
@@ -545,11 +545,12 @@ function layerSummary(registry, c, layerId) {
   return parts.filter(Boolean).join(' · ') || '—'
 }
 
-function GradeEditor({ layerLabel, existing, onSave, onCancel }) {
+function GradeEditor({ layerLabel, existing, evidenceOptions, onSave, onCancel }) {
   const [grade, setGrade] = useState(existing ? existing.grade : null)
   const [evidenceRef, setEvidenceRef] = useState(existing ? existing.evidence_ref : '')
   const [note, setNote] = useState(existing ? existing.confidence_note : '')
   const [notice, setNotice] = useState('')
+  const listId = `evidence-${layerLabel.replace(/\W+/g, '-')}`
 
   const save = () => {
     if (!grade) return setNotice('Pick a grade.')
@@ -573,7 +574,12 @@ function GradeEditor({ layerLabel, existing, onSave, onCancel }) {
         ))}
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-        <input type="text" style={{ flex: 2, minWidth: 220 }} value={evidenceRef} onChange={(e) => setEvidenceRef(e.target.value)} placeholder="Evidence reference (required) — e.g. DLR response 2026-07-02" />
+        <input type="text" list={listId} style={{ flex: 2, minWidth: 220 }} value={evidenceRef} onChange={(e) => setEvidenceRef(e.target.value)} placeholder="Evidence reference (required) — received records appear as suggestions" />
+        <datalist id={listId}>
+          {(evidenceOptions || []).map((o) => (
+            <option key={o} value={o} />
+          ))}
+        </datalist>
         <input type="text" style={{ flex: 2, minWidth: 220 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Confidence note (optional)" />
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -598,13 +604,25 @@ const HINT_META = {
   insufficient: { pill: 'pill-gray', label: 'insufficient data' },
 }
 
-function PairCard({ registry, pair, circuits }) {
+function PairCard({ registry, pair, circuits, requests }) {
   const [editingLayer, setEditingLayer] = useState(null)
   const [proposal, setProposal] = useState(null)
   const [exam, setExam] = useState(null)
   const a = circuits.find((c) => c.id === pair.circuit_a_id)
   const b = circuits.find((c) => c.id === pair.circuit_b_id)
   const cid = (c) => (c && c.layers.identity.circuit_id) || 'missing circuit'
+
+  // Records received from this pair's carriers become selectable
+  // evidence references in the grade editor.
+  const pairCarrierRefs = new Set([a, b].filter(Boolean).map((c) => c.layers.identity.carrier_ref).filter(Boolean))
+  const askLabel = (id) => (ASK_LIST.find((x) => x.id === id) || {}).label || id
+  const evidenceOptions = (requests || [])
+    .filter((r) => pairCarrierRefs.has(r.carrier_ref))
+    .flatMap((r) =>
+      Object.entries(r.items)
+        .filter(([, item]) => item.status === 'received')
+        .map(([itemId, item]) => `${entityLabel(registry, 'carrier', r.carrier_ref)} — ${askLabel(itemId)} (received ${item.received_date})`)
+    )
 
   const counts = { ungraded: 0 }
   GRADE_ORDER.forEach((g) => { counts[g] = 0 })
@@ -690,6 +708,7 @@ function PairCard({ registry, pair, circuits }) {
                 <GradeEditor
                   layerLabel={l.label}
                   existing={proposal && proposal.layerId === l.id ? proposal : g}
+                  evidenceOptions={evidenceOptions}
                   onSave={(gr, ev, nt) => saveGrade(l.id, gr, ev, nt)}
                   onCancel={() => { setEditingLayer(null); setProposal(null) }}
                 />
@@ -708,7 +727,7 @@ const KMZ_CHIP = {
   unknown: { pill: 'pill-gray', label: 'KMZ ?' },
 }
 
-function SiteBlock({ registry, site, circuits, pairs }) {
+function SiteBlock({ registry, site, circuits, pairs, requests }) {
   const [editing, setEditing] = useState(false)
   const [fields, setFields] = useState({ name: site.name, address: site.address, coords: site.coords || '' })
   const [formFor, setFormFor] = useState(null) // null | 'new' | circuit id
@@ -828,7 +847,7 @@ function SiteBlock({ registry, site, circuits, pairs }) {
           {pairs.length > 0 && (
             <div className="row-list" style={{ marginBottom: 10 }}>
               {pairs.map((p) => (
-                <PairCard key={p.id} registry={registry} pair={p} circuits={circuits} />
+                <PairCard key={p.id} registry={registry} pair={p} circuits={circuits} requests={requests} />
               ))}
             </div>
           )}
@@ -898,6 +917,7 @@ export default function Intake() {
             site={site}
             circuits={eng.circuits.filter((c) => c.site_id === site.id)}
             pairs={eng.pairs.filter((p) => p.site_id === site.id)}
+            requests={eng.requests || []}
           />
         ))
       )}

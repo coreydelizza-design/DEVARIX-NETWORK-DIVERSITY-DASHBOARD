@@ -65,7 +65,54 @@ export function makeEngagement(name, clientName) {
     sites: [],
     circuits: [],
     pairs: [],
+    documents: {},
+    requests: [],
   }
+}
+
+// Engagement-level document indicators. LOA is what authorizes carrier
+// records demands; NDA typically gates KMZ release; MSA/SOW frame the
+// engagement; DPA covers client data handling.
+export const ENGAGEMENT_DOCS = [
+  { id: 'msa', label: 'MSA', full: 'Master service agreement' },
+  { id: 'sow', label: 'SOW', full: 'Statement of work' },
+  { id: 'loa', label: 'LOA', full: 'Letter of agency (carrier records authority)' },
+  { id: 'nda', label: 'NDA', full: 'Non-disclosure agreement (KMZ release)' },
+  { id: 'dpa', label: 'DPA', full: 'Data processing agreement' },
+]
+
+export const DOC_STATUS = {
+  missing: { label: 'Not in place', pill: 'pill-gray' },
+  sent: { label: 'Sent / pending', pill: 'pill-amber' },
+  executed: { label: 'Executed', pill: 'pill-teal' },
+}
+
+// The 8-item ask list demanded from every carrier under LOA.
+export const ASK_LIST = [
+  { id: 'dlr', label: 'DLR (design layout record)' },
+  { id: 'wire_center', label: 'Serving wire center' },
+  { id: 'access_provider', label: 'Access provider' },
+  { id: 'nni', label: 'NNI' },
+  { id: 'kmz', label: 'KMZ route file' },
+  { id: 'pop_node', label: 'POP / node' },
+  { id: 'entrance', label: 'Entrance facility' },
+  { id: 'attestation', label: 'Written diversity attestation' },
+]
+
+export const REQUEST_STATUS = {
+  not_requested: { label: 'Not requested', pill: 'pill-gray' },
+  requested: { label: 'Requested', pill: 'pill-blue' },
+  follow_up: { label: 'Follow-up', pill: 'pill-amber' },
+  received: { label: 'Received', pill: 'pill-teal' },
+  refused: { label: 'Refused', pill: 'pill-red' },
+}
+
+export function makeCarrierRequest(carrierRef) {
+  const items = {}
+  ASK_LIST.forEach((a) => {
+    items[a.id] = { status: 'not_requested', requested_date: '', received_date: '' }
+  })
+  return { id: uid('req'), carrier_ref: carrierRef, items }
 }
 
 export function makeSite(name, address, coords) {

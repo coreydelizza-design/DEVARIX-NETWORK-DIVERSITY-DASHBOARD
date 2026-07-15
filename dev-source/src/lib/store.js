@@ -4,7 +4,7 @@
 // persists and notifies in one place.
 
 import { useSyncExternalStore } from 'react'
-import { emptyState, migrate, makeEngagement, makeSite, makeRegistryEntity, normalizeKey, registryId, uid } from './schema'
+import { emptyState, migrate, makeEngagement, makeSite, makeRegistryEntity, makeCarrierRequest, normalizeKey, registryId, uid } from './schema'
 
 const KEY = 'devarix.audit.v1'
 
@@ -118,6 +118,49 @@ export function saveCircuit(circuit) {
         circuits: exists ? e.circuits.map((c) => (c.id === circuit.id ? circuit : c)) : [...e.circuits, circuit],
       }
     })
+  )
+}
+
+// --- engagement workflow: documents & carrier records requests ---
+// Older stored engagements may lack documents/requests; every operation
+// defaults them so pre-feature data keeps working.
+
+function today() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+export function setEngagementDoc(docId, status) {
+  update((s) =>
+    withActiveEngagement(s, (e) => ({
+      ...e,
+      documents: { ...(e.documents || {}), [docId]: { status, date: today() } },
+    }))
+  )
+}
+
+export function addCarrierRequest(carrierRef) {
+  update((s) =>
+    withActiveEngagement(s, (e) => {
+      const requests = e.requests || []
+      if (requests.some((r) => r.carrier_ref === carrierRef)) return { ...e, requests }
+      return { ...e, requests: [...requests, makeCarrierRequest(carrierRef)] }
+    })
+  )
+}
+
+export function setRequestItem(requestId, itemId, status) {
+  update((s) =>
+    withActiveEngagement(s, (e) => ({
+      ...e,
+      requests: (e.requests || []).map((r) => {
+        if (r.id !== requestId) return r
+        const item = r.items[itemId]
+        const patch = { status }
+        if (status === 'requested' && !item.requested_date) patch.requested_date = today()
+        if (status === 'received') patch.received_date = today()
+        return { ...r, items: { ...r.items, [itemId]: { ...item, ...patch } } }
+      }),
+    }))
   )
 }
 
