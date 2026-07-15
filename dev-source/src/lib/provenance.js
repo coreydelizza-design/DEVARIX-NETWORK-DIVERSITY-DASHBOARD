@@ -2,7 +2,7 @@
 // Provenance states describe evidence QUALITY of a fact, in strength
 // order: inferred -> declared -> documented -> verified. This is a
 // separate axis from the diversity GRADES in lib/schema.js
-// (VERIFIED_DIVERSE etc.) — do not conflate the two. Decay is computed
+// (see lib/evidenceModel.js) — do not conflate the two. Decay is computed
 // at render time, never stored.
 //
 // Functions accept an optional `today` so the real expiry engine can

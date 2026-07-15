@@ -2,7 +2,8 @@
 // pair. Pure comparisons on registry entity ids — normalization is the
 // contract, so label text is never compared. A missing field on either
 // side is insufficient_data, never no_match. Match results carry a
-// suggested SHARED_FATE_CONFIRMED proposal with an auto-written evidence
+// unified-record proposal (outcome shared, provenance documented — the
+// contradiction is confirmed by records) with an auto-written evidence
 // reference; nothing is graded unless a human saves it.
 
 function display(registry, kind, ref) {
@@ -25,7 +26,9 @@ export function runChecks(registry, pair, circuits) {
     const av = display(registry, kind, aRef)
     const bv = display(registry, kind, bRef)
     if (!aRef || !bRef) return { num, name, layer, result: 'insufficient_data', a: av, b: bv }
-    if (aRef === bRef) return { num, name, layer, result: 'match', a: av, b: bv, evidence: evidenceFor(av) }
+    if (aRef === bRef) {
+      return { num, name, layer, result: 'match', a: av, b: bv, evidence: evidenceFor(av), proposal: { outcome: 'shared', provenance: 'documented' } }
+    }
     return { num, name, layer, result: 'no_match', a: av, b: bv }
   }
   const notApplicable = (num, name, layer) => ({ num, name, layer, result: 'not_applicable', a: null, b: null })

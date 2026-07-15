@@ -5,8 +5,10 @@ import { PageHead, Metric, Pill, AgeBadge } from '../components/ui'
 const allFacts = sites.flatMap((s) => s.facts.map((f) => ({ ...f, siteId: s.id, city: s.city })))
 
 // Queue membership: expired, or expiring within 60 days of the
-// validity window's end.
-function queueState(f) {
+// validity window's end. Exported so other surfaces (e.g. the
+// Deliverable) can reference expiring evidence; the view itself is out
+// of the nav until the monitoring phase.
+export function queueState(f) {
   if (agingBand(f) === 'expired') return 'expired'
   if (f.validityDays - ageInDays(f.evidenceDate) <= 60) return 'expiring'
   return 'ok'

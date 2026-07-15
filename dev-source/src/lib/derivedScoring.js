@@ -14,13 +14,7 @@
 
 import { LAYERS } from './schema'
 import { gradeOf } from './scoringModel'
-
-export const GRADE_POINTS = {
-  VERIFIED_DIVERSE: 2,
-  CLAIMED_UNVERIFIED: 1,
-  UNKNOWN: 0.5,
-  SHARED_FATE_CONFIRMED: 0,
-}
+import { recordPoints } from './evidenceModel'
 
 export const LAYER_WEIGHTS = {
   identity: 5,
@@ -43,13 +37,13 @@ export function computeDerivedScore(pair, circuits) {
   let graded = 0
   const layers = applicable.map((l) => {
     const g = pair.grades[l.id]
-    const points = g ? GRADE_POINTS[g.grade] : 0.5
+    const points = g ? recordPoints(g) : 0.5
     if (g) graded++
     composite += (points / 2) * (LAYER_WEIGHTS[l.id] / weightTotal) * 100
     return {
       id: l.id,
       label: l.label,
-      grade: g ? g.grade : null,
+      record: g || null,
       points,
       weight: LAYER_WEIGHTS[l.id],
       evidence_ref: g ? g.evidence_ref : '',
@@ -66,6 +60,6 @@ export function computeDerivedScore(pair, circuits) {
     graded,
     applicable: applicable.length,
     coverage: Math.round((withEvidence / applicable.length) * 100),
-    sharedFate: layers.filter((l) => l.grade === 'SHARED_FATE_CONFIRMED').length,
+    sharedFate: layers.filter((l) => l.record && l.record.outcome === 'shared').length,
   }
 }

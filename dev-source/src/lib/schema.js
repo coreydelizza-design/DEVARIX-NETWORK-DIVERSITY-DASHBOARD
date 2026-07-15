@@ -10,10 +10,13 @@
 // across an export/import cycle.
 
 import { clliTable } from './circuitParser'
+import { upgradeEngagement } from './evidenceModel'
 
 export { transportMediums, serviceTypes } from './transportMediums'
 
-export const SCHEMA_VERSION = 1
+// v2: pair-layer grade records became unified {outcome, provenance}
+// evidence records (see evidenceModel.js); v1 stores migrate losslessly.
+export const SCHEMA_VERSION = 2
 
 // The seven infrastructure layers every circuit pair is graded on.
 export const LAYERS = [
@@ -25,15 +28,6 @@ export const LAYERS = [
   { id: 'pop', label: 'POP / node' },
   { id: 'logical', label: 'Logical' },
 ]
-
-// The four evidence grades. A grade without an evidence_ref is an
-// attestation, not a finding — enforcement lives in the grading UI.
-export const GRADES = {
-  VERIFIED_DIVERSE: { label: 'Verified diverse', pill: 'pill-teal' },
-  CLAIMED_UNVERIFIED: { label: 'Claimed, unverified', pill: 'pill-amber' },
-  UNKNOWN: { label: 'Unknown', pill: 'pill-gray' },
-  SHARED_FATE_CONFIRMED: { label: 'Shared fate confirmed', pill: 'pill-red' },
-}
 
 // Canonical entity kinds in the registry namespace.
 export const REGISTRY_KINDS = ['clli', 'asn', 'carrier', 'accessVendor', 'nniId', 'routeSegment', 'pop']
@@ -134,15 +128,6 @@ export function makePair(siteId, circuitAId, circuitBId) {
   return { id: uid('pair'), site_id: siteId, circuit_a_id: circuitAId, circuit_b_id: circuitBId, grades: {} }
 }
 
-export function makeGrade(grade, evidenceRef, confidenceNote) {
-  return {
-    grade: GRADES[grade] ? grade : 'UNKNOWN',
-    evidence_ref: evidenceRef || '',
-    confidence_note: confidenceNote || '',
-    verified_date: new Date().toISOString().slice(0, 10),
-  }
-}
-
 // Starter canonical tables. Carriers are backbone/service providers;
 // access vendors are the last-mile owners (ILECs, cable MSOs, altnets)
 // that Type II circuits actually ride. Both grow via intake.
@@ -177,7 +162,9 @@ export function emptyState() {
 // MIGRATIONS[n] upgrades a version-n state to version n+1. Add a function
 // here whenever SCHEMA_VERSION is bumped; stored data then upgrades
 // stepwise on next load instead of being discarded.
-const MIGRATIONS = {}
+const MIGRATIONS = {
+  1: (s) => ({ ...s, engagements: (s.engagements || []).map(upgradeEngagement) }),
+}
 
 export function migrate(state) {
   if (!state || typeof state !== 'object' || typeof state.schema_version !== 'number') return emptyState()

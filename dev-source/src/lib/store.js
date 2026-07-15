@@ -5,15 +5,19 @@
 
 import { useSyncExternalStore } from 'react'
 import { emptyState, migrate, makeEngagement, makeSite, makeRegistryEntity, makeCarrierRequest, normalizeKey, registryId, uid } from './schema'
+import { upgradeEngagement } from './evidenceModel'
 
-const KEY = 'devarix.audit.v1'
+const KEY = 'devarix.audit.v2'
+// v1 data is read once, migrated (schema.js MIGRATIONS), and rewritten
+// under the bumped key — existing engagements load losslessly.
+const LEGACY_KEY = 'devarix.audit.v1'
 
 let state = null
 const listeners = new Set()
 
 function read() {
   try {
-    const raw = localStorage.getItem(KEY)
+    const raw = localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY)
     if (!raw) return emptyState()
     return migrate(JSON.parse(raw))
   } catch {
@@ -22,7 +26,16 @@ function read() {
 }
 
 export function getState() {
-  if (state === null) state = read()
+  if (state === null) {
+    state = read()
+    // Persist immediately so a migrated v1 store lands under the bumped
+    // key on first load, not on first mutation.
+    try {
+      if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(state))
+    } catch {
+      // quota/privacy failure: in-memory state still works
+    }
+  }
   return state
 }
 
@@ -201,7 +214,8 @@ export function importEngagement(json) {
   // the raw parse so a wrong file gives a clear error, not silent data.
   const raw = JSON.parse(json)
   if (raw.type !== 'devarix-engagement' || !raw.engagement) throw new Error('not a DEVARIX engagement file')
-  const engagement = raw.engagement
+  // Exports written before the unified evidence model upgrade in place.
+  const engagement = upgradeEngagement(raw.engagement)
   update((s) => {
     const registry = mergeRegistry(s.registry, raw.registry)
     const exists = s.engagements.some((e) => e.id === engagement.id)

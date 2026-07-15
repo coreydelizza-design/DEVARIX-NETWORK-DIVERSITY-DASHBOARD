@@ -1,8 +1,7 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { parseCircuitId } from '../lib/circuitParser'
-import { normalizeKey, makeCircuit, makePair, makeGrade, GRADES, LAYERS, ASK_LIST, transportMediums, serviceTypes } from '../lib/schema'
-import { useStore, activeEngagement, addSite, updateSite, saveCircuit, savePair, addRegistryEntity } from '../lib/store'
-import { runChecks, manualHints } from '../lib/crossExam'
+import { normalizeKey, makeCircuit, transportMediums, serviceTypes } from '../lib/schema'
+import { useStore, activeEngagement, addSite, updateSite, saveCircuit, addRegistryEntity, importEngagement } from '../lib/store'
 import { PageHead, Pill } from '../components/ui'
 
 // Text -> canonical entity resolution. Values persist as registry entity
@@ -96,17 +95,17 @@ function AsnPicker({ registry, text, onText }) {
   )
 }
 
-function Section({ title, filled, total, open, onToggle, children }) {
+function Section({ title, filled, total, open, onToggle, locked, children }) {
   return (
-    <div style={{ border: '1px solid var(--line)', borderRadius: 6, marginBottom: 8 }}>
+    <div style={{ border: '1px solid var(--line)', borderRadius: 6, marginBottom: 8, opacity: locked ? 0.6 : 1 }}>
       <button
-        onClick={onToggle}
-        style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}
+        onClick={locked ? undefined : onToggle}
+        style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'none', border: 'none', cursor: locked ? 'default' : 'pointer', font: 'inherit', textAlign: 'left' }}
       >
         <span style={{ fontWeight: 600, fontSize: 13.5 }}>{title}</span>
-        <span className="small muted mono">{filled}/{total} fields {open ? '▾' : '▸'}</span>
+        <span className="small muted mono">{locked ? 'locked until identity saves' : `${filled}/${total} fields ${open ? '▾' : '▸'}`}</span>
       </button>
-      {open && <div style={{ padding: '0 12px 12px' }}>{children}</div>}
+      {open && !locked && <div style={{ padding: '0 12px 12px' }}>{children}</div>}
     </div>
   )
 }
@@ -172,7 +171,7 @@ const emptyForm = {
 function CircuitForm({ registry, site, circuit, onDone, initialSection }) {
   const [f, setF] = useState(() => {
     if (!circuit) return emptyForm
-    // Missing layer fields default so feature-3-era circuits load cleanly.
+    // Missing layer fields default so earlier-era circuits load cleanly.
     const id = circuit.layers.identity || {}
     const loop = circuit.layers.loop || {}
     const ent = circuit.layers.entrance || {}
@@ -216,10 +215,12 @@ function CircuitForm({ registry, site, circuit, onDone, initialSection }) {
   })
   const [parsed, setParsed] = useState(null)
   const [notice, setNotice] = useState('')
-  const [open, setOpen] = useState({ identity: true, loop: true, ...(initialSection ? { [initialSection]: true } : {}) })
+  // Accordions closed by default; identity is the gate.
+  const [open, setOpen] = useState({ identity: true, ...(initialSection ? { [initialSection]: true } : {}) })
   const set = (patch) => setF((prev) => ({ ...prev, ...patch }))
   const toggle = (k) => setOpen((prev) => ({ ...prev, [k]: !prev[k] }))
   const filled = (arr) => arr.filter(Boolean).length
+  const locked = !circuit // layers stay locked until identity saves
 
   const onCircuitId = (v) => {
     const p = parseCircuitId(v)
@@ -363,7 +364,7 @@ function CircuitForm({ registry, site, circuit, onDone, initialSection }) {
         </div>
       </Section>
 
-      <Section title="Local loop" open={!!open.loop} onToggle={() => toggle('loop')}
+      <Section title="Local loop" open={!!open.loop} onToggle={() => toggle('loop')} locked={locked}
         filled={filled(f.accessType === 'type2' ? [f.accessType, f.providerText, f.accessCircuitId, f.clliText, f.loopEvidence] : [f.accessType, f.clliText, f.loopEvidence])}
         total={f.accessType === 'type2' ? 5 : 3}>
         <div className="crit-row">
@@ -401,7 +402,7 @@ function CircuitForm({ registry, site, circuit, onDone, initialSection }) {
         </div>
       </Section>
 
-      <Section title="Building entrance" open={!!open.entrance} onToggle={() => toggle('entrance')}
+      <Section title="Building entrance" open={!!open.entrance} onToggle={() => toggle('entrance')} locked={locked}
         filled={filled([f.conduit, f.demarc, f.riser, f.power, f.entranceEvidence])} total={5}>
         <div className="crit-row">
           <label className="crit-label">Conduit</label>
@@ -426,7 +427,7 @@ function CircuitForm({ registry, site, circuit, onDone, initialSection }) {
       </Section>
 
       {f.accessType === 'type2' && (
-        <Section title="NNI" open={!!open.nni} onToggle={() => toggle('nni')}
+        <Section title="NNI" open={!!open.nni} onToggle={() => toggle('nni')} locked={locked}
           filled={filled([f.nniClli, f.nniIdText, f.nniEvidence])} total={3}>
           <div className="crit-row">
             <label className="crit-label">NNI location CLLI</label>
@@ -446,7 +447,7 @@ function CircuitForm({ registry, site, circuit, onDone, initialSection }) {
         </Section>
       )}
 
-      <Section title="Route" open={!!open.route} onToggle={() => toggle('route')}
+      <Section title="Route" open={!!open.route} onToggle={() => toggle('route')} locked={locked}
         filled={filled([f.kmzReceived !== 'unknown', f.kmzFileRef, f.overlapSegments, f.routeEvidence])} total={4}>
         <div className="crit-row">
           <label className="crit-label">KMZ received</label>
@@ -466,7 +467,7 @@ function CircuitForm({ registry, site, circuit, onDone, initialSection }) {
         </div>
       </Section>
 
-      <Section title="POP / node" open={!!open.pop} onToggle={() => toggle('pop')}
+      <Section title="POP / node" open={!!open.pop} onToggle={() => toggle('pop')} locked={locked}
         filled={filled([f.popClli, f.routerNode, f.shelfCardPort, f.popEvidence])} total={4}>
         <div className="crit-row">
           <label className="crit-label">POP CLLI</label>
@@ -489,7 +490,7 @@ function CircuitForm({ registry, site, circuit, onDone, initialSection }) {
         </div>
       </Section>
 
-      <Section title="Logical" open={!!open.logical} onToggle={() => toggle('logical')}
+      <Section title="Logical" open={!!open.logical} onToggle={() => toggle('logical')} locked={locked}
         filled={filled([f.asnText, f.bgpMultihoming !== 'unknown', f.tracerouteDivergence !== 'unknown', f.logicalEvidence])} total={4}>
         <div className="crit-row">
           <label className="crit-label">Egress ASN observed</label>
@@ -510,213 +511,11 @@ function CircuitForm({ registry, site, circuit, onDone, initialSection }) {
       </Section>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
-        <button className="btn btn-primary" onClick={save}>Save circuit</button>
+        <button className="btn btn-primary" onClick={save}>{locked ? 'Save identity' : 'Save circuit'}</button>
         <button className="btn" onClick={onDone}>Cancel</button>
         {notice && <span className="small danger">{notice}</span>}
       </div>
-    </div>
-  )
-}
-
-// --- circuit pairs & grade matrix ---
-
-const GRADE_ORDER = ['VERIFIED_DIVERSE', 'CLAIMED_UNVERIFIED', 'UNKNOWN', 'SHARED_FATE_CONFIRMED']
-const GRADE_COLORS = {
-  VERIFIED_DIVERSE: '#0b7261',
-  CLAIMED_UNVERIFIED: '#c07f16',
-  UNKNOWN: '#6b7280',
-  SHARED_FATE_CONFIRMED: '#a83228',
-}
-
-function layerSummary(registry, c, layerId) {
-  if (!c) return '—'
-  const L = c.layers[layerId] || {}
-  const clli = (ref) => (registry.clli.find((e) => e.id === ref) || {}).key || ''
-  const tri = (v, label) => (v && v !== 'unknown' ? `${label} ${v}` : '')
-  const parts = {
-    identity: [L.circuit_id, entityLabel(registry, 'carrier', L.carrier_ref), L.service_type],
-    loop: [L.access_type === 'type2' ? 'Type II' : L.access_type === 'onnet' ? 'On-net' : '', entityLabel(registry, 'accessVendor', L.access_provider_ref), clli(L.wire_center_ref)],
-    entrance: [L.conduit, L.demarc, L.power],
-    nni: [clli(L.nni_clli_ref), entityLabel(registry, 'nniId', L.nni_id_ref)],
-    route: [tri(L.kmz_received, 'KMZ'), L.overlap_segments],
-    pop: [clli(L.pop_clli_ref), L.router_node, L.shelf_card_port],
-    logical: [entityLabel(registry, 'asn', L.egress_asn_ref), tri(L.bgp_multihoming, 'BGP'), tri(L.traceroute_divergence, 'TR div')],
-  }[layerId] || []
-  return parts.filter(Boolean).join(' · ') || '—'
-}
-
-function GradeEditor({ layerLabel, existing, evidenceOptions, onSave, onCancel }) {
-  const [grade, setGrade] = useState(existing ? existing.grade : null)
-  const [evidenceRef, setEvidenceRef] = useState(existing ? existing.evidence_ref : '')
-  const [note, setNote] = useState(existing ? existing.confidence_note : '')
-  const [notice, setNotice] = useState('')
-  const listId = `evidence-${layerLabel.replace(/\W+/g, '-')}`
-
-  const save = () => {
-    if (!grade) return setNotice('Pick a grade.')
-    if (!evidenceRef.trim()) return setNotice('Evidence reference required — a grade without evidence is an attestation, not a finding.')
-    onSave(grade, evidenceRef.trim(), note.trim())
-  }
-
-  return (
-    <div style={{ background: 'var(--canvas)', borderRadius: 6, padding: '10px 12px', marginTop: 8 }}>
-      <p className="small" style={{ fontWeight: 600, margin: '0 0 8px' }}>Grade · {layerLabel}</p>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-        {GRADE_ORDER.map((g) => (
-          <button
-            key={g}
-            className="btn"
-            style={grade === g ? { background: GRADE_COLORS[g], borderColor: GRADE_COLORS[g], color: '#fff' } : undefined}
-            onClick={() => setGrade(g)}
-          >
-            {GRADES[g].label}
-          </button>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-        <input type="text" list={listId} style={{ flex: 2, minWidth: 220 }} value={evidenceRef} onChange={(e) => setEvidenceRef(e.target.value)} placeholder="Evidence reference (required) — received records appear as suggestions" />
-        <datalist id={listId}>
-          {(evidenceOptions || []).map((o) => (
-            <option key={o} value={o} />
-          ))}
-        </datalist>
-        <input type="text" style={{ flex: 2, minWidth: 220 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Confidence note (optional)" />
-      </div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button className="btn btn-primary" onClick={save}>Save grade</button>
-        <button className="btn" onClick={onCancel}>Cancel</button>
-        {notice && <span className="small danger">{notice}</span>}
-      </div>
-    </div>
-  )
-}
-
-const CHECK_RESULT_META = {
-  match: { pill: 'pill-red', label: 'shared-fate indicator' },
-  no_match: { pill: 'pill-teal', label: 'no match' },
-  insufficient_data: { pill: 'pill-gray', label: 'insufficient data' },
-  not_applicable: { pill: 'pill-gray', label: 'n/a — on-net' },
-}
-
-const HINT_META = {
-  review: { pill: 'pill-amber', label: 'review needed' },
-  info: { pill: 'pill-blue', label: 'info' },
-  insufficient: { pill: 'pill-gray', label: 'insufficient data' },
-}
-
-function PairCard({ registry, pair, circuits, requests }) {
-  const [editingLayer, setEditingLayer] = useState(null)
-  const [proposal, setProposal] = useState(null)
-  const [exam, setExam] = useState(null)
-  const a = circuits.find((c) => c.id === pair.circuit_a_id)
-  const b = circuits.find((c) => c.id === pair.circuit_b_id)
-  const cid = (c) => (c && c.layers.identity.circuit_id) || 'missing circuit'
-
-  // Records received from this pair's carriers become selectable
-  // evidence references in the grade editor.
-  const pairCarrierRefs = new Set([a, b].filter(Boolean).map((c) => c.layers.identity.carrier_ref).filter(Boolean))
-  const askLabel = (id) => (ASK_LIST.find((x) => x.id === id) || {}).label || id
-  const evidenceOptions = (requests || [])
-    .filter((r) => pairCarrierRefs.has(r.carrier_ref))
-    .flatMap((r) =>
-      Object.entries(r.items)
-        .filter(([, item]) => item.status === 'received')
-        .map(([itemId, item]) => `${entityLabel(registry, 'carrier', r.carrier_ref)} — ${askLabel(itemId)} (received ${item.received_date})`)
-    )
-
-  const counts = { ungraded: 0 }
-  GRADE_ORDER.forEach((g) => { counts[g] = 0 })
-  LAYERS.forEach((l) => {
-    const g = pair.grades[l.id]
-    if (g) counts[g.grade]++
-    else counts.ungraded++
-  })
-
-  const saveGrade = (layerId, grade, evidenceRef, note) => {
-    savePair({ ...pair, grades: { ...pair.grades, [layerId]: makeGrade(grade, evidenceRef, note) } })
-    setEditingLayer(null)
-    setProposal(null)
-  }
-
-  const propose = (chk) => {
-    setProposal({ layerId: chk.layer, grade: 'SHARED_FATE_CONFIRMED', evidence_ref: chk.evidence, confidence_note: '' })
-    setEditingLayer(chk.layer)
-  }
-
-  return (
-    <div className="row-item">
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span className="mono" style={{ fontWeight: 600, fontSize: 13.5 }}>{cid(a)} × {cid(b)}</span>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          {GRADE_ORDER.filter((g) => counts[g] > 0).map((g) => (
-            <Pill key={g} kind={GRADES[g].pill}>{counts[g]} {GRADES[g].label.toLowerCase()}</Pill>
-          ))}
-          {counts.ungraded > 0 && <span className="small faint">{counts.ungraded} ungraded</span>}
-          <button className="btn" style={{ padding: '4px 10px', fontSize: 13 }} onClick={() => setExam(exam ? null : { checks: runChecks(registry, pair, circuits), hints: manualHints(pair, circuits) })}>
-            {exam ? 'Hide cross-exam' : 'Run cross-exam'}
-          </button>
-        </div>
-      </div>
-
-      {exam && (
-        <div style={{ background: 'var(--canvas)', borderRadius: 6, padding: '10px 12px', marginTop: 8 }}>
-          <p className="small" style={{ fontWeight: 600, margin: '0 0 6px' }}>Cross-examination · automated checks on structured fields</p>
-          {exam.checks.map((chk) => (
-            <div key={chk.num} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', padding: '5px 0', borderTop: '1px solid var(--line)' }}>
-              <span className="small" style={{ flex: '0 0 190px', fontWeight: 600 }}>{chk.num}. {chk.name}</span>
-              <span className="small muted mono" style={{ flex: 1, minWidth: 160 }}>
-                {chk.result === 'not_applicable' ? '—' : `A: ${chk.a || '—'} · B: ${chk.b || '—'}`}
-              </span>
-              <Pill kind={CHECK_RESULT_META[chk.result].pill}>{CHECK_RESULT_META[chk.result].label}</Pill>
-              {chk.result === 'match' && (
-                <button className="btn" style={{ padding: '4px 10px', fontSize: 13 }} onClick={() => propose(chk)}>Propose grade</button>
-              )}
-            </div>
-          ))}
-          {exam.hints.map((h) => (
-            <div key={h.num} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', padding: '5px 0', borderTop: '1px solid var(--line)' }}>
-              <span className="small" style={{ flex: '0 0 190px', fontWeight: 600 }}>{h.num}. {h.name}</span>
-              <span className="small muted" style={{ flex: 1, minWidth: 160 }}>{h.text}</span>
-              <Pill kind={HINT_META[h.status].pill}>{HINT_META[h.status].label}</Pill>
-            </div>
-          ))}
-          <p className="small faint" style={{ margin: '6px 0 0' }}>
-            The engine proposes; the auditor saves. Matches pre-fill a SHARED_FATE_CONFIRMED grade — nothing is graded automatically.
-          </p>
-        </div>
-      )}
-      <div style={{ marginTop: 8 }}>
-        {LAYERS.map((l) => {
-          const g = pair.grades[l.id]
-          return (
-            <div key={l.id} style={{ borderTop: '1px solid var(--line)', padding: '8px 0' }}>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                <span style={{ flex: '0 0 120px', fontWeight: 600, fontSize: 13 }}>{l.label}</span>
-                <span className="small muted" style={{ flex: 1, minWidth: 160 }}>A: {layerSummary(registry, a, l.id)}</span>
-                <span className="small muted" style={{ flex: 1, minWidth: 160 }}>B: {layerSummary(registry, b, l.id)}</span>
-                {g ? <Pill kind={GRADES[g.grade].pill}>{GRADES[g.grade].label}</Pill> : <span className="small faint">ungraded</span>}
-                <button className="btn" style={{ padding: '4px 10px', fontSize: 13 }} onClick={() => setEditingLayer(editingLayer === l.id ? null : l.id)}>
-                  {g ? 'Regrade' : 'Grade'}
-                </button>
-              </div>
-              {g && (
-                <p className="small faint mono" style={{ margin: '4px 0 0', fontSize: 12 }}>
-                  evidence: {g.evidence_ref} · verified {g.verified_date}{g.confidence_note ? ` · ${g.confidence_note}` : ''}
-                </p>
-              )}
-              {editingLayer === l.id && (
-                <GradeEditor
-                  layerLabel={l.label}
-                  existing={proposal && proposal.layerId === l.id ? proposal : g}
-                  evidenceOptions={evidenceOptions}
-                  onSave={(gr, ev, nt) => saveGrade(l.id, gr, ev, nt)}
-                  onCancel={() => { setEditingLayer(null); setProposal(null) }}
-                />
-              )}
-            </div>
-          )
-        })}
-      </div>
+      {locked && <p className="small faint" style={{ margin: '8px 0 0' }}>Layer sections unlock once the circuit's identity saves.</p>}
     </div>
   )
 }
@@ -727,15 +526,13 @@ const KMZ_CHIP = {
   unknown: { pill: 'pill-gray', label: 'KMZ ?' },
 }
 
-function SiteBlock({ registry, site, circuits, pairs, requests }) {
+function SiteBlock({ registry, site, circuits }) {
   const [editing, setEditing] = useState(false)
   const [fields, setFields] = useState({ name: site.name, address: site.address, coords: site.coords || '' })
   const [formFor, setFormFor] = useState(null) // null | 'new' | circuit id
   const [formSection, setFormSection] = useState(null)
-  const [pairSel, setPairSel] = useState({ a: '', b: '' })
 
   const mediumLabel = (id) => (transportMediums.find((m) => m.id === id) || {}).label || ''
-  const cidOf = (c) => c.layers.identity.circuit_id || c.id
 
   const svcCounts = {}
   circuits.forEach((c) => {
@@ -750,12 +547,6 @@ function SiteBlock({ registry, site, circuits, pairs, requests }) {
         carriers.join(', '),
       ].filter(Boolean).join(' · ')
     : ''
-
-  const definePair = () => {
-    if (!pairSel.a || !pairSel.b || pairSel.a === pairSel.b) return
-    savePair(makePair(site.id, pairSel.a, pairSel.b))
-    setPairSel({ a: '', b: '' })
-  }
 
   return (
     <div className="card">
@@ -811,9 +602,6 @@ function SiteBlock({ registry, site, circuits, pairs, requests }) {
                     <button className="btn" style={{ padding: '5px 10px', fontSize: 13 }} onClick={() => { setFormSection(null); setFormFor(c.id) }}>Edit</button>
                   </div>
                 </div>
-                <p className="small muted" style={{ margin: '4px 0 0' }}>
-                  {entityLabel(registry, 'carrier', id.carrier_ref) || 'No carrier'} · {id.service_type || 'no service type'} · {mediumLabel(id.access_medium) || 'no medium'}
-                </p>
                 <p className="small muted" style={{ margin: '2px 0 0' }}>
                   {loop.access_type === 'type2' && `via ${entityLabel(registry, 'accessVendor', loop.access_provider_ref) || 'unknown provider'} · `}
                   wire center: {(registry.clli.find((e) => e.id === loop.wire_center_ref) || {}).key || 'unknown'}
@@ -840,34 +628,40 @@ function SiteBlock({ registry, site, circuits, pairs, requests }) {
           />
         </div>
       )}
+    </div>
+  )
+}
 
-      {circuits.length >= 2 && (
-        <div style={{ marginTop: 16 }}>
-          <p className="card-sub" style={{ marginBottom: 8 }}>Circuit pairs · graded per layer with evidence</p>
-          {pairs.length > 0 && (
-            <div className="row-list" style={{ marginBottom: 10 }}>
-              {pairs.map((p) => (
-                <PairCard key={p.id} registry={registry} pair={p} circuits={circuits} requests={requests} />
-              ))}
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <select value={pairSel.a} onChange={(e) => setPairSel({ ...pairSel, a: e.target.value })}>
-              <option value="">Circuit A…</option>
-              {circuits.map((c) => (
-                <option key={c.id} value={c.id}>{cidOf(c)}</option>
-              ))}
-            </select>
-            <select value={pairSel.b} onChange={(e) => setPairSel({ ...pairSel, b: e.target.value })}>
-              <option value="">Circuit B…</option>
-              {circuits.filter((c) => c.id !== pairSel.a).map((c) => (
-                <option key={c.id} value={c.id}>{cidOf(c)}</option>
-              ))}
-            </select>
-            <button className="btn btn-primary" onClick={definePair} disabled={!pairSel.a || !pairSel.b}>Define pair</button>
-          </div>
-        </div>
-      )}
+function ImportPanel() {
+  const fileRef = useRef(null)
+  const [notice, setNotice] = useState('')
+
+  const onImport = (e) => {
+    const file = e.target.files[0]
+    e.target.value = ''
+    if (!file) return
+    file.text().then((text) => {
+      try {
+        importEngagement(text)
+        setNotice('Engagement imported.')
+      } catch (err) {
+        setNotice(`Import failed: ${err.message}`)
+      }
+    })
+  }
+
+  return (
+    <div className="card">
+      <p className="card-title">Import intake workbook</p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+        <button className="btn btn-primary" onClick={() => fileRef.current.click()}>Import engagement JSON…</button>
+        <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onImport} />
+        {notice && <span className="small muted">{notice}</span>}
+      </div>
+      <div style={{ border: '1px dashed var(--line-strong)', borderRadius: 6, padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span className="small muted">Workbook import lands with the intake template — use JSON import today.</span>
+        <Pill kind="pill-gray">XLSX · coming soon</Pill>
+      </div>
     </div>
   )
 }
@@ -894,8 +688,10 @@ export default function Intake() {
       <PageHead
         eyebrow="Intake and validation"
         title={`Site intake · ${eng.name}`}
-        sub="The site address is the join key for everything downstream. Every layer records where its facts came from — a field without an evidence source cannot support a graded finding."
+        sub="The site address is the join key for everything downstream. Every layer records where its facts came from — pairing and grading happen in the Evidence & checks step."
       />
+
+      <ImportPanel />
 
       <div className="card">
         <p className="card-title">Add site</p>
@@ -916,8 +712,6 @@ export default function Intake() {
             registry={s.registry}
             site={site}
             circuits={eng.circuits.filter((c) => c.site_id === site.id)}
-            pairs={eng.pairs.filter((p) => p.site_id === site.id)}
-            requests={eng.requests || []}
           />
         ))
       )}
@@ -953,7 +747,7 @@ function DemoIntake() {
 
       <div className="card" style={{ borderColor: 'var(--teal)' }}>
         <p className="small muted" style={{ margin: 0 }}>
-          <strong style={{ color: 'var(--ink)' }}>Demo data.</strong> Create or select an engagement in the Engagements view to begin real circuit intake.
+          <strong style={{ color: 'var(--ink)' }}>Demo data.</strong> Create or select an engagement in the Engagement step to begin real circuit intake.
         </p>
       </div>
 
@@ -984,23 +778,6 @@ function DemoIntake() {
               <p className="small muted" style={{ margin: '2px 0 0' }}>{c.note}</p>
             </div>
           ))}
-        </div>
-      </div>
-
-      <div className="two-col" style={{ marginBottom: 16 }}>
-        <div className="card" style={{ margin: 0 }}>
-          <p className="card-title">North vault · Race St conduit</p>
-          <p className="small muted" style={{ margin: '4px 0 0' }}>
-            Serves CKT-88213 and CKT-91077. Two circuits, one entrance: a single dig event severs both.
-          </p>
-          <p className="small danger" style={{ margin: '6px 0 0', fontWeight: 600 }}>Shared entry — single point of failure</p>
-        </div>
-        <div className="card" style={{ margin: 0 }}>
-          <p className="card-title">South vault · 49th Ave conduit</p>
-          <p className="small muted" style={{ margin: '4px 0 0' }}>
-            Built and unused. Candidate landing point to split the circuit pair across entrances.
-          </p>
-          <p className="small ok" style={{ margin: '6px 0 0', fontWeight: 600 }}>Available — remediation path exists</p>
         </div>
       </div>
 
