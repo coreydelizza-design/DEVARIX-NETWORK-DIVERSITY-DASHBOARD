@@ -8,33 +8,52 @@ import { emptyState, migrate, makeEngagement, makeSite, makeRegistryEntity, make
 import { upgradeEngagement } from './evidenceModel'
 import { mintElement, validateFact, makeFact } from './graph'
 import { makeSharedFateRelation } from './collisions'
+import { buildSampleEngagement } from './syntheticData'
 
 const KEY = 'devarix.audit.v3'
 // Older stores are read once, migrated up through schema.js MIGRATIONS,
 // and rewritten under the current key — existing engagements load losslessly.
 const LEGACY_KEYS = ['devarix.audit.v2', 'devarix.audit.v1']
 
+// The sample engagement is deterministic and read-only. It is injected
+// into state on read (never diverges from the seed) and stripped from
+// persistence writes, so it can neither be mutated nor exported.
+const SAMPLE = buildSampleEngagement()
+
 let state = null
 const listeners = new Set()
+
+function injectSample(base) {
+  return {
+    ...base,
+    engagements: [SAMPLE.engagement, ...(base.engagements || []).filter((e) => e.id !== 'sample')],
+    registry: { ...base.registry, elements: { ...(base.registry.elements || {}), ...SAMPLE.elements } },
+    active_engagement_id: base.active_engagement_id || 'sample',
+  }
+}
 
 function read() {
   try {
     let raw = localStorage.getItem(KEY)
     if (!raw) raw = LEGACY_KEYS.map((k) => localStorage.getItem(k)).find(Boolean)
-    if (!raw) return emptyState()
-    return migrate(JSON.parse(raw))
+    return injectSample(raw ? migrate(JSON.parse(raw)) : emptyState())
   } catch {
-    return emptyState()
+    return injectSample(emptyState())
   }
+}
+
+// Persist everything except the injected sample engagement.
+function persistable(s) {
+  return { ...s, engagements: (s.engagements || []).filter((e) => e.id !== 'sample') }
 }
 
 export function getState() {
   if (state === null) {
     state = read()
-    // Persist immediately so a migrated v1 store lands under the bumped
-    // key on first load, not on first mutation.
+    // Persist immediately so a migrated store lands under the bumped key
+    // on first load, not on first mutation.
     try {
-      if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(state))
+      if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(persistable(state)))
     } catch {
       // quota/privacy failure: in-memory state still works
     }
@@ -45,10 +64,10 @@ export function getState() {
 export function update(fn) {
   state = fn(getState())
   try {
-    localStorage.setItem(KEY, JSON.stringify(state))
+    localStorage.setItem(KEY, JSON.stringify(persistable(state)))
   } catch {
     // Quota or privacy-mode failure: state still updates in memory; the
-    // Engagements view surfaces persistence status.
+    // settings view surfaces persistence status.
   }
   listeners.forEach((l) => l())
 }
@@ -106,8 +125,12 @@ export function registryEntity(kind, id) {
 
 // --- site & circuit operations (active engagement) ---
 
+// The sample engagement is read-only: mutations targeting it are no-ops.
 function withActiveEngagement(s, fn) {
-  return { ...s, engagements: s.engagements.map((e) => (e.id === s.active_engagement_id ? fn(e) : e)) }
+  return {
+    ...s,
+    engagements: s.engagements.map((e) => (e.id === s.active_engagement_id && !e.sample ? fn(e) : e)),
+  }
 }
 
 export function addSite(name, address, coords) {
@@ -243,7 +266,7 @@ export function adjudicateFact(factId, adjudication) {
 // the registry — the compounding cross-engagement asset.
 export function acceptCollision(finding, evidenceRef, date) {
   const eng = activeEngagement(getState())
-  if (!eng) return null
+  if (!eng || eng.sample) return null
   const rel = makeSharedFateRelation(finding, evidenceRef, eng.id, date || new Date().toISOString().slice(0, 10))
   update((s) => ({ ...s, registry: { ...s.registry, sharedFate: [...(s.registry.sharedFate || []), rel] } }))
   return rel
@@ -256,7 +279,7 @@ export function acceptCollision(finding, evidenceRef, date) {
 export function exportEngagement(id) {
   const s = getState()
   const engagement = s.engagements.find((e) => e.id === id)
-  if (!engagement) return null
+  if (!engagement || engagement.sample) return null // sample is excluded from export
   return JSON.stringify(
     { type: 'devarix-engagement', schema_version: s.schema_version, registry: s.registry, engagement },
     null,

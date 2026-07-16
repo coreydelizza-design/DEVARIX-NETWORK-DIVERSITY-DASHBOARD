@@ -1,281 +1,195 @@
-import { gradeOf, model } from './scoringModel'
-import { TODAY, agingBand } from './provenance'
-import { REQUIREMENTS } from './tierModel'
+// Sample-engagement seeder ONLY (spine §2.1). Builds the read-only,
+// watermarked "Sample — Meridian Industrial (synthetic)" engagement as a
+// full L1-L3 element graph: 24 sites, two services each, core-ring
+// elements, facts, deliberate shared-fate collisions (shared conduit,
+// carrier hotel, underlying carrier on a "diverse" pair, adjacent SD-WAN
+// orchestrator promoted on collision), a source-vs-source conflict, and a
+// missing-with-reason fact. Deterministic: seeded LCG + TODAY constant,
+// no Date.now/Math.random. The store injects this; no view imports it.
 
-// Deterministic seeded RNG so the demo portfolio is stable across reloads.
+import { TODAY } from './provenance'
+import { mintElement, promoteToElement, makeFact } from './graph'
+
 function rng(seed) {
   let s = seed
-  return function () {
+  return () => {
     s = (s * 1103515245 + 12345) % 2147483648
     return s / 2147483648
   }
 }
-
-const regions = ['AMER', 'EMEA', 'APAC', 'LATAM']
-const tiers = [
-  ['Data center', 18],
-  ['Regional hub', 32],
-  ['Plant', 50],
-  ['Branch', 80],
-]
-const cities = [
-  'Denver', 'Frankfurt', 'Singapore', 'Sao Paulo', 'Chicago', 'London', 'Tokyo',
-  'Mexico City', 'Dallas', 'Amsterdam', 'Sydney', 'Bogota', 'Atlanta', 'Paris',
-  'Mumbai', 'Santiago', 'Phoenix', 'Madrid', 'Seoul', 'Lima', 'Toronto', 'Milan',
-  'Osaka', 'Monterrey', 'Seattle', 'Warsaw', 'Bangkok', 'Buenos Aires', 'Boston',
-  'Dublin', 'Manila', 'Quito',
-]
-
-// [flag text, domain, weighted portfolio impact per site]
-export const flagPool = [
-  ['Same conduit or building entrance', 'Local loop', 5.2],
-  ['Both loops home to same wire center', 'Wire center', 3.1],
-  ['Single NNI convergence', 'Backbone', 4.4],
-  ['Single edge router', 'Hardware', 3.8],
-  ['Single entrance facility', 'Data center', 3.4],
-  ['Both circuits on one access carrier', 'Local loop', 4.6],
-  ['Long-haul route unvalidated', 'Backbone', 2.2],
-  ['Single cloud on-ramp', 'Cloud', 2.8],
-  ['No A+B power feeds', 'Data center', 2.4],
-  ['Internet-only cloud path', 'Cloud', 2.0],
-  ['Local loop path unvalidated', 'Local loop', 2.6],
-  ['Redundant routers share power', 'Hardware', 1.8],
-]
-
-function buildSites() {
-  const r = rng(42)
-  const sites = []
-  let id = 100
-  tiers.forEach(([tier, count]) => {
-    const base = tier === 'Data center' ? 68 : tier === 'Regional hub' ? 58 : tier === 'Plant' ? 46 : 40
-    for (let i = 0; i < count; i++) {
-      let score = Math.round(base + (r() * 44 - 22))
-      score = Math.max(12, Math.min(98, score))
-      const nf = score >= 85 ? Math.round(r()) : score >= 65 ? 1 + Math.round(r() * 2) : score >= 40 ? 2 + Math.round(r() * 3) : 4 + Math.round(r() * 3)
-      const pool = flagPool.slice()
-      const flags = []
-      for (let k = 0; k < nf && pool.length; k++) {
-        flags.push(pool.splice(Math.floor(r() * pool.length), 1)[0])
-      }
-      sites.push({
-        id: 'S-' + id++,
-        city: cities[Math.floor(r() * cities.length)],
-        region: regions[Math.floor(r() * 4)],
-        tier,
-        score,
-        grade: gradeOf(score),
-        flags,
-      })
-    }
-  })
-  return sites
-}
-
-export const sites = buildSites()
-
-// --- evidence facts (demo provenance layer) ---
-// A separate seeded RNG so adding facts leaves the existing site
-// scores, flags, and cities byte-identical.
-
-const factPool = [
-  'Access carrier separation',
-  'Local loop conduit path',
-  'Serving wire center assignment',
-  'Entrance facility separation',
-  'A+B power feed separation',
-  'Edge router redundancy',
-  'Backbone provider separation',
-  'NNI handoff mapping',
-  'Long-haul route KMZ',
-  'Cloud on-ramp redundancy',
-]
-
-const factCarriers = ['Carrier one', 'Carrier two', 'Carrier three']
-
 function dateDaysBeforeToday(days) {
   const d = new Date(TODAY)
   d.setDate(d.getDate() - days)
   return d.toISOString().slice(0, 10)
 }
 
-// --- resilience tiers, posture, and tier-aware evidence facts ---
-// One deterministic pass (own seed) assigns each site a governed tier,
-// declared criticality inputs, per-domain posture selections, and
-// evidence facts biased so the portfolio lands at a 60-70% conformance
-// rate with all five verdicts represented. Verdicts themselves are never
-// stored — conformance.js computes them at render time.
+const CITIES = [
+  ['Denver', 'AMER', 'DNVRCO'], ['Chicago', 'AMER', 'CHCGIL'], ['Dallas', 'AMER', 'DLLSTX'],
+  ['Atlanta', 'AMER', 'ATLNGA'], ['Seattle', 'AMER', 'STTLWA'], ['Phoenix', 'AMER', 'PHNXAZ'],
+  ['New York', 'AMER', 'NYCMNY'], ['Boston', 'AMER', 'BSTNMA'], ['London', 'EMEA', 'LONDEN'],
+  ['Frankfurt', 'EMEA', 'FRNKGE'], ['Amsterdam', 'EMEA', 'AMSTNL'], ['Paris', 'EMEA', 'PARSFR'],
+  ['Singapore', 'APAC', 'SNGPSG'], ['Tokyo', 'APAC', 'TOKYJP'], ['Sydney', 'APAC', 'SYDNAU'],
+  ['Mumbai', 'APAC', 'MMBAIN'], ['Sao Paulo', 'LATAM', 'SAOPBR'], ['Mexico City', 'LATAM', 'MXCYMX'],
+  ['Toronto', 'AMER', 'TORNON'], ['Madrid', 'EMEA', 'MADRES'], ['Milan', 'EMEA', 'MILNIT'],
+  ['Seoul', 'APAC', 'SEOLKR'], ['Bogota', 'LATAM', 'BGTACO'], ['Dublin', 'EMEA', 'DUBLIE'],
+]
+const CARRIERS = ['Lumen', 'Zayo', 'AT&T', 'Verizon', 'Colt']
+const VENDORS = ['Ziply Fiber', 'Frontier', 'Comcast', 'Windstream']
 
-const DOMAIN_LABELS = {
-  'Local loop / last mile': ['Access carrier separation', 'Local loop conduit path'],
-  'Serving wire center': ['Serving wire center assignment'],
-  'Data center facility': ['Entrance facility separation', 'A+B power feed separation'],
-  'Edge routers / hardware': ['Edge router redundancy'],
-  'Backbone / transport': ['Backbone provider separation', 'NNI handoff mapping', 'Long-haul route KMZ'],
-  'Cloud connectivity': ['Cloud on-ramp redundancy'],
+// Per-site config guaranteeing a full verdict spread and acceptance #7's
+// two decoupled cases (green < 50, red > 65). type/tier/quality plus flags:
+// wc = force shared wire center (L1), cd/ho/un = shared conduit/hotel/
+// underlying, or = shared adjacent orchestrator, cf = conflict, ms = missing.
+const SITES = [
+  { t: 'Data center', tier: 'T1', q: 'strong', wc: true },   // 0 red>65 (shared L1, else verified)
+  { t: 'Data center', tier: 'T1', q: 'strong' },             // 1 conformant
+  { t: 'Data center', tier: 'T1', q: 'strong', cd: true },   // 2 nonconformant (shared conduit)
+  { t: 'Data center', tier: 'T1', q: 'strong' },             // 3 conformant
+  { t: 'Regional hub', tier: 'T2', q: 'strong' },            // 4 conformant
+  { t: 'Regional hub', tier: 'T2', q: 'strong', ho: true },  // 5 nonconformant (shared hotel)
+  { t: 'Regional hub', tier: 'T2', q: 'aging' },             // 6 at-risk
+  { t: 'Regional hub', tier: 'T2', q: 'strong', cf: true },  // 7 conflict
+  { t: 'Regional hub', tier: 'T1', q: 'strong' },            // 8 conformant
+  { t: 'Regional hub', tier: 'T2', q: 'strong', un: true },  // 9 at-risk (shared underlying L2)
+  { t: 'Plant', tier: 'T3', q: 'strong' },                   // 10 over-provisioned
+  { t: 'Plant', tier: 'T2', q: 'strong', ms: true },         // 11 at-risk (missing NNI)
+  { t: 'Plant', tier: 'T2', q: 'aging' },                    // 12 at-risk
+  { t: 'Plant', tier: 'T3', q: 'strong' },                   // 13 over-provisioned
+  { t: 'Plant', tier: 'T2', q: 'strong', or: true },         // 14 at-risk (adjacent orchestrator)
+  { t: 'Plant', tier: 'T3', q: 'aging' },                    // 15 at-risk
+  { t: 'Plant', tier: 'T2', q: 'strong' },                   // 16 conformant
+  { t: 'Plant', tier: 'T3', q: 'thin' },                     // 17 conformant (low score, tolerated)
+  { t: 'Branch', tier: 'T4', q: 'thin' },                    // 18 green<50
+  { t: 'Branch', tier: 'T4', q: 'thin' },                    // 19 green<50
+  { t: 'Branch', tier: 'T4', q: 'strong' },                  // 20 over-provisioned
+  { t: 'Branch', tier: 'T3', q: 'aging' },                   // 21 at-risk
+  { t: 'Branch', tier: 'T3', q: 'thin' },                    // 22 conformant low
+  { t: 'Branch', tier: 'T4', q: 'aging' },                   // 23 at-risk
+]
+
+// quality -> (outcome, provenance, age-days) for a non-shared service fact.
+// strong: verified-diverse & fresh. thin: unknown outcome (low score, but
+// not a weak diversity claim) -> Conformant on a tolerant tier. aging:
+// diverse but stale, so provenance decays and the site reads at-risk.
+function factProfile(q, r) {
+  if (q === 'strong') return { outcome: 'diverse', provenance: 'verified', age: Math.floor(r() * 120), validity: 365 }
+  if (q === 'thin') return { outcome: 'unknown', provenance: 'declared', age: Math.floor(r() * 120), validity: 365 }
+  return { outcome: 'diverse', provenance: 'documented', age: 400 + Math.floor(r() * 220), validity: 365 } // aging: decays
 }
 
-const LABEL_DOMAIN = {}
-Object.entries(DOMAIN_LABELS).forEach(([domain, labels]) => labels.forEach((l) => { LABEL_DOMAIN[l] = domain }))
-
-function attachTiersAndFacts(list) {
-  const r = rng(2024)
-  const used = new Set()
-  const pickDistinct = (n) => {
-    const out = new Set()
-    while (out.size < n) {
-      const i = Math.floor(r() * list.length)
-      if (!used.has(i)) {
-        used.add(i)
-        out.add(i)
-      }
-    }
-    return out
+export function buildSampleEngagement() {
+  const r = rng(90210)
+  const elements = {}
+  const mint = (typeId, val, label) => {
+    const m = mintElement(elements, typeId, val, label)
+    if (m.ok && !m.existed) elements[m.id] = m.element
+    return m.ok ? m.id : null
   }
-  const opIdx = pickDistinct(6) // Over-provisioned quota
-  const naTierIdx = pickDistinct(2) // Not assessed: tier never assigned
-  const naFactsIdx = pickDistinct(2) // Not assessed: no evidence captured
-  const misIdx = pickDistinct(4) // tier misassignment candidates
-
-  const bestSel = (d) => d.criteria.map((c) => {
-    let bi = 0
-    c.opts.forEach((o, oi) => { if (o[1] > c.opts[bi][1]) bi = oi })
-    return bi
-  })
-
-  list.forEach((site, idx) => {
-    let tier = site.tier === 'Data center' ? 'T1'
-      : site.tier === 'Regional hub' ? (r() < 0.2 ? 'T1' : 'T2')
-      : site.tier === 'Plant' ? (r() < 0.5 ? 'T2' : 'T3')
-      : (r() < 0.2 ? 'T4' : 'T3')
-    if (opIdx.has(idx) || misIdx.has(idx)) tier = 'T3'
-
-    const revK = { T1: 100 + r() * 400, T2: 20 + r() * 100, T3: 2 + r() * 38, T4: 0.5 + r() * 4.5 }[tier]
-    site.revenuePerHourUSD = Math.round(revK) * 1000
-    site.rtoHours = Math.round({ T1: 1 + r() * 3, T2: 5 + r() * 19, T3: 25 + r() * 47, T4: 72 + r() * 96 }[tier])
-    if (misIdx.has(idx)) {
-      site.revenuePerHourUSD = 120000 + Math.round(r() * 180) * 1000
-      site.rtoHours = 2 + Math.round(r() * 2)
-    }
-
-    const assignedBy = r() < 0.1 ? 'customer-override' : 'platform-recommended'
-    site.tierAssignment = naTierIdx.has(idx) ? null : {
-      tier,
-      assignedBy,
-      assignedDate: dateDaysBeforeToday(30 + Math.floor(r() * 300)),
-      rationale: assignedBy === 'customer-override'
-        ? 'Customer designated criticality above platform recommendation'
-        : 'Recommended from revenue-at-risk and RTO inputs',
-    }
-
-    // Verdict bias target (never stored; only shapes posture and facts).
-    let target
-    if (opIdx.has(idx)) target = 'op'
-    else if (naTierIdx.has(idx) || naFactsIdx.has(idx)) target = 'na'
-    else {
-      const x = r()
-      target = x < 0.62 ? 'conformant' : x < 0.8 ? 'atrisk' : 'nonconformant'
-    }
-    // T3/T4 posture floors are permissive; posture failure is impossible.
-    if (target === 'nonconformant' && (tier === 'T3' || tier === 'T4')) target = 'atrisk'
-
-    const reqs = REQUIREMENTS[tier]
-    site.posture = model.map((d, di) => {
-      const req = reqs[di]
-      if (!req.applicable) return d.criteria.map((c) => Math.floor(r() * c.opts.length))
-      return d.criteria.map((c, ci) => Math.max(req.minPosture[ci] || 0, req.anyOf ? req.anyOf[0][ci] || 0 : 0))
-    })
-    if (target === 'op') {
-      let boosted = 0
-      model.forEach((d, di) => {
-        if (reqs[di].applicable && boosted < 3) {
-          site.posture[di] = bestSel(d)
-          boosted++
-        }
-      })
-    }
-    if (target === 'nonconformant') {
-      const di = model.findIndex((d, i) => reqs[i].applicable && reqs[i].minPosture.some((m) => m > 0))
-      if (di >= 0) {
-        const ci = reqs[di].minPosture.findIndex((m) => m > 0)
-        site.posture[di] = [...site.posture[di]]
-        site.posture[di][ci] = 0
-      }
-    }
-
-    let breakDomain = null
-    if (target === 'atrisk') {
-      const apps = model.map((d, i) => i).filter((i) => reqs[i].applicable)
-      breakDomain = model[apps[Math.floor(r() * apps.length)]].name
-    }
-
-    const facts = []
-    if (!naFactsIdx.has(idx)) {
-      model.forEach((d, di) => {
-        if (!reqs[di].applicable) return
-        const labels = DOMAIN_LABELS[d.name]
-        const label = labels[Math.floor(r() * labels.length)]
-        const carrier = factCarriers[Math.floor(r() * 3)]
-        if (breakDomain === d.name) {
-          // Stale past the tier's freshness window (decays too).
-          facts.push({ label, carrier, status: 'verified', evidenceDate: dateDaysBeforeToday(reqs[di].freshnessDays + 40 + Math.floor(r() * 100)), validityDays: 365 })
-        } else {
-          facts.push({ label, carrier, status: 'verified', evidenceDate: dateDaysBeforeToday(Math.floor(r() * Math.min(200, reqs[di].freshnessDays * 0.5))), validityDays: 365 })
-        }
-      })
-      // Decorative facts keep the aging bands populated; low provenance so
-      // they can never rescue a biased break, and never on the broken domain.
-      const extras = 2 + Math.floor(r() * 3)
-      for (let i = 0; i < extras; i++) {
-        const label = factPool[Math.floor(r() * factPool.length)]
-        if (LABEL_DOMAIN[label] === breakDomain) continue
-        const carrier = factCarriers[Math.floor(r() * 3)]
-        const status = r() < 0.6 ? 'declared' : 'inferred'
-        const validityDays = [90, 180, 365][Math.floor(r() * 3)]
-        const bPick = r()
-        let age
-        if (bPick < 0.5) age = Math.floor(r() * 0.65 * validityDays)
-        else if (bPick < 0.8) age = Math.floor((0.72 + r() * 0.26) * validityDays)
-        else age = Math.floor((1.05 + r() * 0.7) * validityDays)
-        facts.push({ label, carrier, status, evidenceDate: dateDaysBeforeToday(age), validityDays })
-      }
-    }
-    site.facts = facts
-  })
-}
-attachTiersAndFacts(sites)
-
-export function factBands() {
-  const counts = { fresh: 0, aging: 0, expired: 0 }
-  sites.forEach((s) => s.facts.forEach((f) => counts[agingBand(f)]++))
-  return counts
-}
-
-export function portfolioStats() {
-  const counts = { res: 0, part: 0, exp: 0, crit: 0 }
-  let flagTotal = 0
-  let scoreTotal = 0
-  sites.forEach((s) => {
-    counts[s.grade]++
-    flagTotal += s.flags.length
-    scoreTotal += s.score
-  })
-  return {
-    total: sites.length,
-    avg: Math.round(scoreTotal / sites.length),
-    critical: counts.crit,
-    flags: flagTotal,
-    counts,
+  const promote = (typeId, val, label) => {
+    const m = promoteToElement(elements, typeId, val, label)
+    if (m.ok && !m.existed) elements[m.id] = m.element
+    return m.ok ? m.id : null
   }
-}
 
-export function remediationPrograms(limit = 5) {
-  const agg = {}
-  sites.forEach((s) =>
-    s.flags.forEach(([text, domain, impact]) => {
-      if (!agg[text]) agg[text] = { text, domain, impact: 0, count: 0 }
-      agg[text].impact += impact
-      agg[text].count++
+  const sites = []
+  const services = []
+  const edges = []
+  const facts = []
+  let edgeN = 0
+  let factN = 0
+  const addEdge = (from, to) => { if (to) edges.push({ id: `edge-${edgeN++}`, kind: 'traverses', from, to }) }
+  const addFact = (subjectType, subjectId, dim, p) => facts.push(makeFact(`fact-${factN++}`, subjectType, subjectId, dim, p))
+  const REV = { T1: 200000, T2: 60000, T3: 12000, T4: 2000 }
+  const RTO = { T1: 2, T2: 8, T3: 36, T4: 96 }
+
+  SITES.forEach((cfg, i) => {
+    const [city, region, clli] = CITIES[i]
+    const id = `S-${100 + i}`
+    const tier = cfg.tier
+    const assignedBy = i % 11 === 0 ? 'customer-override' : 'platform-recommended'
+    sites.push({
+      id, name: `${id} · ${city} ${cfg.t.toLowerCase()}`, city, region, tier, siteType: cfg.t,
+      address: `${100 + Math.floor(r() * 8900)} Industrial Way, ${city}`,
+      coords: `${(20 + r() * 40).toFixed(3)} / ${(-120 + r() * 100).toFixed(3)}`,
+      revenuePerHourUSD: cfg.ms || cfg.wc ? 140000 : REV[tier], // a couple of misassignment candidates
+      rtoHours: RTO[tier],
+      tierAssignment: {
+        tier, assignedBy, assignedDate: dateDaysBeforeToday(30 + Math.floor(r() * 200)),
+        rationale: assignedBy === 'customer-override' ? 'Customer-designated criticality' : 'From revenue-at-risk and RTO inputs',
+      },
     })
-  )
-  return Object.values(agg).sort((a, b) => b.impact - a.impact).slice(0, limit)
+
+    const svcA = { id: `svc-${id}-A`, site_id: id, name: `${id} primary` }
+    const svcB = { id: `svc-${id}-B`, site_id: id, name: `${id} secondary` }
+    services.push(svcA, svcB)
+
+    const carrierA = CARRIERS[i % CARRIERS.length]
+    const carrierB = CARRIERS[(i + 2) % CARRIERS.length]
+
+    const wcA = mint('wire_center', clli)
+    const wcB = mint('wire_center', cfg.wc ? clli : `${clli.slice(0, 4)}${10 + (i % 80)}`)
+    addEdge(svcA.id, wcA); addEdge(svcB.id, wcB)
+
+    const apA = mint('access_provider', carrierA)
+    const apB = mint('access_provider', carrierB)
+    addEdge(svcA.id, apA); addEdge(svcB.id, apB)
+
+    const vendorA = VENDORS[i % VENDORS.length]
+    const vendorB = cfg.un ? vendorA : VENDORS[(i + 1) % VENDORS.length]
+    const upA = mint('underlying_provider', vendorA)
+    const upB = mint('underlying_provider', vendorB)
+    addEdge(svcA.id, upA); addEdge(svcB.id, upB)
+
+    const hotelA = mint('pop_hotel', `${city} CH1`, `${city} carrier hotel 1`)
+    const hotelB = mint('pop_hotel', cfg.ho ? `${city} CH1` : `${city} CH2`, `${city} carrier hotel 2`)
+    addEdge(svcA.id, hotelA); addEdge(svcB.id, hotelB)
+
+    const conduitA = mint('conduit', `${id}-CDT-N`)
+    const conduitB = mint('conduit', cfg.cd ? `${id}-CDT-N` : `${id}-CDT-S`)
+    addEdge(svcA.id, conduitA); addEdge(svcB.id, conduitB)
+
+    // adjacent orchestrator: note captured on both services -> promoted to a
+    // shared element (a named finding class) on the orchestrator-collision site.
+    if (cfg.or) {
+      const orch = promote('orchestrator', 'Meridian-SDWAN-Orch-1', 'Meridian SD-WAN orchestrator')
+      addEdge(svcA.id, orch); addEdge(svcB.id, orch)
+    }
+
+    // Diversity facts are SERVICE-scoped (a service's posture at a layer),
+    // so shared canonical elements don't leak facts across sites. Per
+    // dimension, a shared element (A element === B element) yields a
+    // shared fact; otherwise the site's quality profile applies.
+    ;[['wire_center', wcA, wcB], ['access_provider', apA, apB], ['underlying_provider', upA, upB], ['pop_hotel', hotelA, hotelB], ['conduit', conduitA, conduitB]].forEach(([dim, ea, eb]) => {
+      if (!ea) return
+      if (ea === eb) {
+        addFact('service', svcA.id, dim, { value: 'shared', outcome: 'shared', provenance: 'documented', sourceRef: { kind: 'carrier_response', label: `${carrierA} DLR` }, capturedDate: dateDaysBeforeToday(Math.floor(r() * 90)), validityDays: 365 })
+      } else {
+        const p = factProfile(cfg.q, r)
+        addFact('service', svcA.id, dim, { value: p.outcome, outcome: p.outcome, provenance: p.provenance, sourceRef: { kind: r() < 0.6 ? 'carrier_response' : 'document_ref', label: `${svcA.name} · ${dim}` }, capturedDate: dateDaysBeforeToday(p.age), validityDays: p.validity })
+      }
+    })
+
+    if (cfg.ms) {
+      const nni = mint('nni', `${clli}-NNI-01`)
+      addEdge(svcA.id, nni)
+      addFact('service', svcA.id, 'nni', { value: null, missingReason: 'requested_pending', provenance: 'inferred', sourceRef: { kind: 'carrier_response', label: `${carrierA} records request` }, capturedDate: dateDaysBeforeToday(18), validityDays: 365 })
+    }
+    if (cfg.cf) {
+      addFact('service', svcA.id, 'wire_center', { value: 'diverse', outcome: 'diverse', provenance: 'declared', sourceRef: { kind: 'client_declaration', label: 'Client network team' }, capturedDate: dateDaysBeforeToday(45), validityDays: 365 })
+      addFact('service', svcA.id, 'wire_center', { value: 'shared', outcome: 'shared', provenance: 'documented', sourceRef: { kind: 'carrier_response', label: `${carrierA} DLR` }, capturedDate: dateDaysBeforeToday(9), validityDays: 365 })
+    }
+  })
+
+  const engagement = {
+    id: 'sample',
+    sample: true,
+    name: 'Sample — Meridian Industrial (synthetic)',
+    client: { name: 'Meridian Industrial (synthetic)' },
+    created_date: dateDaysBeforeToday(45),
+    sites, services, edges, facts,
+    pairs: [], circuits: [],
+    documents: { msa: { status: 'executed', date: dateDaysBeforeToday(60) }, sow: { status: 'executed', date: dateDaysBeforeToday(50) }, loa: { status: 'executed', date: dateDaysBeforeToday(44) }, nda: { status: 'executed', date: dateDaysBeforeToday(44) }, dpa: { status: 'sent', date: dateDaysBeforeToday(30) } },
+    requests: [],
+  }
+  return { engagement, elements }
 }

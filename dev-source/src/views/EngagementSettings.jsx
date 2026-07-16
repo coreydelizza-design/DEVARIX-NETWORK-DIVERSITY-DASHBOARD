@@ -130,7 +130,7 @@ function slug(s) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'engagement'
 }
 
-export default function Engagements() {
+export default function EngagementSettings() {
   const s = useStore()
   const [name, setName] = useState('')
   const [client, setClient] = useState('')
@@ -168,9 +168,9 @@ export default function Engagements() {
   return (
     <div>
       <PageHead
-        eyebrow="Engagement workspace"
-        title="Engagements"
-        sub="Each audit engagement is a separate client workspace stored in this browser. The registry — canonical CLLIs, carriers, vendors — is shared across engagements and compounds with every audit."
+        eyebrow="Engagement settings"
+        title="Engagement settings"
+        sub="Client record, documents, records-request tracker, and import/export for the active engagement. The registry — canonical CLLIs, carriers, elements — is shared across engagements and compounds with every audit."
       />
 
       <div className="metric-grid">
@@ -279,7 +279,8 @@ export default function Engagements() {
           canonical entities — no client data, no grades — for seeding the next engagement.
         </p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn btn-primary" onClick={() => fileRef.current.click()}>Import engagement…</button>
+          <button className="btn btn-primary" onClick={() => fileRef.current.click()}>Import engagement JSON…</button>
+          <span style={{ border: '1px dashed var(--line-strong)', borderRadius: 6, padding: '4px 10px' }} className="small muted">XLSX workbook import lands with the intake template — use JSON today <Pill kind="pill-gray">XLSX · soon</Pill></span>
           <button className="btn" onClick={() => download('devarix-registry.json', exportRegistry())}>Export registry</button>
           <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onImport} />
           {notice && <span className="small muted">{notice}</span>}

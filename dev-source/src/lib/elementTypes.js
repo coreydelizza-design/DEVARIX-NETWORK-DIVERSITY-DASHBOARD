@@ -67,10 +67,12 @@ const EXTENDED = [
   { id: 'eos_eol', name: 'EoS / EoL dates', layer: 'L1', ring: 'extended', captureMode: 'attribute', sharedFateDimensions: [] },
 ]
 
+// Adjacent-ring types capture as notes but carry a canonical key so a
+// shared dependency can be promoted to an element (a named finding class).
 const ADJACENT = [
-  { id: 'orchestrator', name: 'SD-WAN / control-plane orchestrator', layer: 'adjacent', ring: 'adjacent', captureMode: 'note', sharedFateDimensions: ['orchestrator'], promotionRule: 'promote to finding when two services name the same orchestrator' },
-  { id: 'dns_ntp_identity', name: 'DNS / NTP / identity', layer: 'adjacent', ring: 'adjacent', captureMode: 'note', sharedFateDimensions: ['identity_service'] },
-  { id: 'mgmt_system', name: 'Management system', layer: 'adjacent', ring: 'adjacent', captureMode: 'note', sharedFateDimensions: ['mgmt'] },
+  { id: 'orchestrator', name: 'SD-WAN / control-plane orchestrator', layer: 'adjacent', ring: 'adjacent', captureMode: 'note', canonicalKey: 'facilityId', sharedFateDimensions: ['orchestrator'], promotionRule: 'promote to element when two services name the same orchestrator' },
+  { id: 'dns_ntp_identity', name: 'DNS / NTP / identity', layer: 'adjacent', ring: 'adjacent', captureMode: 'note', canonicalKey: 'facilityId', sharedFateDimensions: ['identity_service'] },
+  { id: 'mgmt_system', name: 'Management system', layer: 'adjacent', ring: 'adjacent', captureMode: 'note', canonicalKey: 'facilityId', sharedFateDimensions: ['mgmt'] },
 ]
 
 export const ELEMENT_TYPES = [...CORE, ...EXTENDED, ...ADJACENT]

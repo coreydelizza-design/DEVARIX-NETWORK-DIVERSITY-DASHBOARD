@@ -5,9 +5,9 @@
 // is forbidden and facts are never naked (source + provenance + date).
 
 import { TYPE_BY_ID, canonicalKeyFor } from './elementTypes'
-import { OUTCOMES, PROVENANCE } from './evidenceModel'
+import { OUTCOMES, OUTCOME_META, PROVENANCE } from './evidenceModel'
 
-export { OUTCOMES, PROVENANCE }
+export { OUTCOMES, OUTCOME_META, PROVENANCE }
 
 export const EDGE_KINDS = ['traverses', 'within', 'risk_group']
 
@@ -53,11 +53,16 @@ export function mintElement(elements, typeId, rawValue, label) {
 }
 
 // Promotion on collision: a note/attribute value becomes a full element
-// the moment two paths reference it. Same canonical-key discipline.
+// the moment two paths reference it — the sanctioned exception to the
+// element-only rule. Still requires a canonical key.
 export function promoteToElement(elements, typeId, rawValue, label) {
-  const r = mintElement(elements, typeId, rawValue, label)
-  if (r.ok && !r.existed) r.element.promoted = true
-  return r
+  const t = TYPE_BY_ID[typeId]
+  if (!t) return { ok: false, reason: `unknown element type ${typeId}` }
+  const id = canonicalKeyFor(typeId, rawValue)
+  if (!id) return { ok: false, reason: 'no canonical key — cannot promote' }
+  if (elements[id]) return { ok: true, id, element: elements[id], existed: true }
+  const element = { id, typeId, layer: t.layer, ring: t.ring, key: id.slice(typeId.length + 1), label: label || `${t.name} · ${rawValue}`, promoted: true }
+  return { ok: true, id, element, existed: false }
 }
 
 // --- facts (no naked facts) ---

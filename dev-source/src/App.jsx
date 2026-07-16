@@ -1,49 +1,36 @@
 import { useState } from 'react'
-import Engagements from './views/Engagements'
-import Dashboard from './views/Dashboard'
-import Scorer from './views/Scorer'
-import SiteDetail from './views/SiteDetail'
-import Intake from './views/Intake'
-import EvidenceChecks from './views/EvidenceChecks'
-import Tco from './views/Tco'
-import FindingsReport from './views/FindingsReport'
+import { useStore, selectEngagement } from './lib/store'
+import Sites from './views/Sites'
+import Site from './views/Site'
+import EvidenceQueue from './views/EvidenceQueue'
+import Deliverable from './views/Deliverable'
+import EngagementSettings from './views/EngagementSettings'
 
-// Two modes, one app. Demo is the synthetic showcase; Engagement is the
-// persisted audit pipeline. Demo views read only synthetic data;
-// engagement views read only the store.
-const DEMO_NAV = [
-  ['dashboard', 'Portfolio'],
-  ['scorer', 'Site scorer'],
-  ['site', 'Site drill-down'],
-  ['tco', 'Outage TCO'],
-]
-
-const ENGAGEMENT_NAV = [
-  ['engagements', '1 Engagement'],
-  ['intake', '2 Intake'],
-  ['evidence', '3 Evidence & checks'],
-  ['findings', '4 Deliverable'],
+// One app, always inside an open engagement (spine §2.1). Nav is four
+// nouns plus the engagement picker.
+const NAV = [
+  ['sites', 'Sites'],
+  ['evidence', 'Evidence queue'],
+  ['deliverable', 'Deliverable'],
+  ['settings', 'Engagement settings'],
 ]
 
 export default function App() {
-  const [mode, setMode] = useState(() => {
-    try { return localStorage.getItem('devarix.ui.mode') || 'demo' } catch { return 'demo' }
-  })
-  const [view, setView] = useState(mode === 'demo' ? 'dashboard' : 'engagements')
+  const s = useStore()
+  const [view, setView] = useState('sites')
   const [activeSite, setActiveSite] = useState(null)
+  const [siteTab, setSiteTab] = useState('overview')
 
-  const nav = mode === 'demo' ? DEMO_NAV : ENGAGEMENT_NAV
+  const active = s.engagements.find((e) => e.id === s.active_engagement_id) || s.engagements[0]
 
-  const switchMode = (m) => {
-    if (m === mode) return
-    setMode(m)
-    try { localStorage.setItem('devarix.ui.mode', m) } catch { /* ignore */ }
-    setView(m === 'demo' ? 'dashboard' : 'engagements')
-  }
-
-  const openSite = (site) => {
+  const openSite = (site, tab = 'overview') => {
     setActiveSite(site)
+    setSiteTab(tab)
     setView('site')
+  }
+  const openSiteTab = (siteId, tab) => {
+    const site = (active.sites || []).find((x) => x.id === siteId)
+    if (site) openSite(site, tab)
   }
 
   return (
@@ -51,43 +38,32 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <p className="brand-name">DEVARIX</p>
-          <p className="brand-sub">Network diversity assurance</p>
+          <p className="brand-sub">Infrastructure dependency assurance</p>
         </div>
-        <div className="mode-switch">
-          {[['demo', 'Demo'], ['engagement', 'Engagement']].map(([m, label]) => (
-            <button key={m} className={mode === m ? 'active' : ''} onClick={() => switchMode(m)}>
-              {label}
-            </button>
-          ))}
+        <div className="eng-picker">
+          <label className="small faint">Engagement</label>
+          <select value={s.active_engagement_id || ''} onChange={(e) => { selectEngagement(e.target.value); setView('sites') }}>
+            {s.engagements.map((e) => <option key={e.id} value={e.id}>{e.sample ? '★ ' : ''}{e.name}</option>)}
+          </select>
         </div>
-        {nav.map(([key, label], i) => (
-          <button
-            key={key}
-            className={`nav-item ${view === key ? 'active' : ''}`}
-            onClick={() => setView(key)}
-          >
-            <span className="nav-num">0{i + 1}</span>
-            {label}
+        {NAV.map(([key, label], i) => (
+          <button key={key} className={`nav-item ${view === key ? 'active' : ''}`} onClick={() => setView(key)}>
+            <span className="nav-num">0{i + 1}</span>{label}
           </button>
         ))}
         <div className="sidebar-foot">
-          {mode === 'demo'
-            ? 'Demo build · synthetic data. Scores, sites, carriers, and circuit IDs are illustrative.'
-            : 'Engagement data persists in this browser. Export from the Engagement step before clearing storage.'}
+          {active && active.sample
+            ? 'Sample engagement — synthetic, read-only, excluded from export.'
+            : 'Engagement data persists in this browser. Export from settings before clearing storage.'}
         </div>
       </aside>
       <main className="main">
-        {mode === 'demo' && (
-          <div className="demo-banner no-print">Demo data — synthetic portfolio for illustration</div>
-        )}
-        {mode === 'demo' && view === 'dashboard' && <Dashboard openSite={openSite} />}
-        {mode === 'demo' && view === 'scorer' && <Scorer />}
-        {mode === 'demo' && view === 'site' && <SiteDetail site={activeSite} />}
-        {mode === 'demo' && view === 'tco' && <Tco />}
-        {mode === 'engagement' && view === 'engagements' && <Engagements />}
-        {mode === 'engagement' && view === 'intake' && <Intake />}
-        {mode === 'engagement' && view === 'evidence' && <EvidenceChecks />}
-        {mode === 'engagement' && view === 'findings' && <FindingsReport />}
+        {active && active.sample && <div className="sample-banner no-print">SAMPLE — synthetic engagement for illustration. Read-only, excluded from export.</div>}
+        {view === 'sites' && <Sites openSite={openSite} />}
+        {view === 'site' && <Site site={activeSite} back={() => setView('sites')} />}
+        {view === 'evidence' && <EvidenceQueue openSiteTab={openSiteTab} />}
+        {view === 'deliverable' && <Deliverable />}
+        {view === 'settings' && <EngagementSettings />}
       </main>
     </div>
   )

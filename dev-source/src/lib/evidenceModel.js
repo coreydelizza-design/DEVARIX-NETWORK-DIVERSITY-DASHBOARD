@@ -33,9 +33,10 @@ export function makeRecord(outcome, provenance, evidenceRef, confidenceNote) {
 
 // A stale record degrades provenance over its validity window via the
 // same decay math as demo facts; the outcome never changes by itself.
+// Reads capturedDate (graph facts) or verified_date (legacy grade records).
 export function effectiveProvenance(record, today) {
   return effectiveStatus(
-    { status: record.provenance, evidenceDate: record.verified_date, validityDays: RECORD_VALIDITY_DAYS },
+    { status: record.provenance, evidenceDate: record.capturedDate || record.verified_date, validityDays: record.validityDays || RECORD_VALIDITY_DAYS },
     today
   )
 }

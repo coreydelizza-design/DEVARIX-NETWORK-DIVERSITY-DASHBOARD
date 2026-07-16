@@ -87,14 +87,11 @@ export function deriveGraphForState(state) {
 
     ;(eng.pairs || []).forEach((p) => {
       Object.entries(p.grades || {}).forEach(([layerId, g]) => {
-        const typeId = GRADE_LAYER_MAP[layerId]
-        const anchorElement = typeId && circuitElementIds[p.circuit_a_id] && circuitElementIds[p.circuit_a_id][typeId]
-        const subjectType = anchorElement ? 'element' : 'service'
-        const subjectId = anchorElement || `svc-${p.circuit_a_id}`
-        // every migrated grade carries evidence_ref (editor enforced it),
-        // so the derived fact is never naked.
+        // Grade facts are service-scoped (about circuit A's posture at the
+        // layer), so shared canonical elements don't collect facts across
+        // sites. Every migrated grade carried evidence_ref, so never naked.
         facts.push(
-          makeFact(`fact-${eng.id}-${factN++}`, subjectType, subjectId, layerId, {
+          makeFact(`fact-${eng.id}-${factN++}`, 'service', `svc-${p.circuit_a_id}`, layerId, {
             value: g.outcome || 'unknown',
             outcome: g.outcome || 'unknown',
             provenance: g.provenance || 'declared',
