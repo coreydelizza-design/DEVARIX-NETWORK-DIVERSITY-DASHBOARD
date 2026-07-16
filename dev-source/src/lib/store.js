@@ -6,18 +6,21 @@
 import { useSyncExternalStore } from 'react'
 import { emptyState, migrate, makeEngagement, makeSite, makeRegistryEntity, makeCarrierRequest, normalizeKey, registryId, uid } from './schema'
 import { upgradeEngagement } from './evidenceModel'
+import { mintElement, validateFact, makeFact } from './graph'
+import { makeSharedFateRelation } from './collisions'
 
-const KEY = 'devarix.audit.v2'
-// v1 data is read once, migrated (schema.js MIGRATIONS), and rewritten
-// under the bumped key — existing engagements load losslessly.
-const LEGACY_KEY = 'devarix.audit.v1'
+const KEY = 'devarix.audit.v3'
+// Older stores are read once, migrated up through schema.js MIGRATIONS,
+// and rewritten under the current key — existing engagements load losslessly.
+const LEGACY_KEYS = ['devarix.audit.v2', 'devarix.audit.v1']
 
 let state = null
 const listeners = new Set()
 
 function read() {
   try {
-    const raw = localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY)
+    let raw = localStorage.getItem(KEY)
+    if (!raw) raw = LEGACY_KEYS.map((k) => localStorage.getItem(k)).find(Boolean)
     if (!raw) return emptyState()
     return migrate(JSON.parse(raw))
   } catch {
@@ -184,6 +187,66 @@ export function savePair(pair) {
       return { ...e, pairs: exists ? e.pairs.map((p) => (p.id === pair.id ? pair : p)) : [...e.pairs, pair] }
     })
   )
+}
+
+// --- element graph write API (spine §3) ---
+
+// The sample engagement is read-only; graph mutations refuse to touch it.
+export function isSampleActive(s) {
+  const e = activeEngagement(s || getState())
+  return !!(e && e.sample)
+}
+
+// Mint or match an element into the registry namespace by canonical key.
+// Free-text creation is forbidden — returns {ok:false} with a reason.
+export function graphMintElement(typeId, rawValue, label) {
+  const r = mintElement(getState().registry.elements || {}, typeId, rawValue, label)
+  if (r.ok && !r.existed) {
+    update((s) => ({ ...s, registry: { ...s.registry, elements: { ...(s.registry.elements || {}), [r.id]: r.element } } }))
+  }
+  return r
+}
+
+export function graphAddService(siteId, name) {
+  const svc = { id: uid('svc'), site_id: siteId, name: name || 'Service' }
+  update((s) => withActiveEngagement(s, (e) => ({ ...e, services: [...(e.services || []), svc] })))
+  return svc
+}
+
+export function graphAddEdge(from, to, kind) {
+  const edge = { id: uid('edge'), kind: kind || 'traverses', from, to }
+  update((s) => withActiveEngagement(s, (e) => {
+    const dup = (e.edges || []).some((x) => x.kind === edge.kind && x.from === from && x.to === to)
+    return dup ? e : { ...e, edges: [...(e.edges || []), edge] }
+  }))
+  return edge
+}
+
+// Capture a fact — no naked facts. Throws with the validation reason when
+// source / provenance / date are missing, so the caller surfaces it.
+export function captureFact(subjectType, subjectId, dimension, payload) {
+  const fact = makeFact(uid('fact'), subjectType, subjectId, dimension, payload)
+  const err = validateFact(fact)
+  if (err) throw new Error(err)
+  update((s) => withActiveEngagement(s, (e) => ({ ...e, facts: [...(e.facts || []), fact] })))
+  return fact
+}
+
+export function adjudicateFact(factId, adjudication) {
+  update((s) => withActiveEngagement(s, (e) => ({
+    ...e,
+    facts: (e.facts || []).map((f) => (f.id === factId ? { ...f, adjudication } : f)),
+  })))
+}
+
+// Accept a collision finding: write the confirmed shared-fate relation to
+// the registry — the compounding cross-engagement asset.
+export function acceptCollision(finding, evidenceRef, date) {
+  const eng = activeEngagement(getState())
+  if (!eng) return null
+  const rel = makeSharedFateRelation(finding, evidenceRef, eng.id, date || new Date().toISOString().slice(0, 10))
+  update((s) => ({ ...s, registry: { ...s.registry, sharedFate: [...(s.registry.sharedFate || []), rel] } }))
+  return rel
 }
 
 // --- export / import ---

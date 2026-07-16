@@ -7,6 +7,17 @@
 
 export const TIERS = ['T1', 'T2', 'T3', 'T4']
 
+// v3: tier requirements expressed as required independence per graph
+// layer (spine §3). 'required' = no shared elements across the site's
+// primary delivery paths; 'mitigated' = sharing tolerated with a diverse
+// backup at another layer; 'tolerated' = sharing acceptable.
+export const LAYER_INDEPENDENCE = {
+  T1: { L1: 'required', L2: 'required', L3: 'required' },
+  T2: { L1: 'required', L2: 'mitigated', L3: 'mitigated' },
+  T3: { L1: 'mitigated', L2: 'tolerated', L3: 'tolerated' },
+  T4: { L1: 'tolerated', L2: 'tolerated', L3: 'tolerated' },
+}
+
 export const TIER_META = {
   T1: { name: 'Mission-critical', blurb: 'Loss halts revenue or safety-critical operations' },
   T2: { name: 'Important', blurb: 'Loss degrades operations within a business day' },
