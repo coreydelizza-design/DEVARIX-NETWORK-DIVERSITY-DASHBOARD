@@ -6,32 +6,54 @@
 import { useSyncExternalStore } from 'react'
 import { emptyState, migrate, makeEngagement, makeSite, makeRegistryEntity, makeCarrierRequest, normalizeKey, registryId, uid } from './schema'
 import { upgradeEngagement } from './evidenceModel'
+import { mintElement, validateFact, makeFact } from './graph'
+import { makeSharedFateRelation } from './collisions'
+import { buildSampleEngagement } from './syntheticData'
 
-const KEY = 'devarix.audit.v2'
-// v1 data is read once, migrated (schema.js MIGRATIONS), and rewritten
-// under the bumped key — existing engagements load losslessly.
-const LEGACY_KEY = 'devarix.audit.v1'
+const KEY = 'devarix.audit.v3'
+// Older stores are read once, migrated up through schema.js MIGRATIONS,
+// and rewritten under the current key — existing engagements load losslessly.
+const LEGACY_KEYS = ['devarix.audit.v2', 'devarix.audit.v1']
+
+// The sample engagement is deterministic and read-only. It is injected
+// into state on read (never diverges from the seed) and stripped from
+// persistence writes, so it can neither be mutated nor exported.
+const SAMPLE = buildSampleEngagement()
 
 let state = null
 const listeners = new Set()
 
+function injectSample(base) {
+  return {
+    ...base,
+    engagements: [SAMPLE.engagement, ...(base.engagements || []).filter((e) => e.id !== 'sample')],
+    registry: { ...base.registry, elements: { ...(base.registry.elements || {}), ...SAMPLE.elements } },
+    active_engagement_id: base.active_engagement_id || 'sample',
+  }
+}
+
 function read() {
   try {
-    const raw = localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY)
-    if (!raw) return emptyState()
-    return migrate(JSON.parse(raw))
+    let raw = localStorage.getItem(KEY)
+    if (!raw) raw = LEGACY_KEYS.map((k) => localStorage.getItem(k)).find(Boolean)
+    return injectSample(raw ? migrate(JSON.parse(raw)) : emptyState())
   } catch {
-    return emptyState()
+    return injectSample(emptyState())
   }
+}
+
+// Persist everything except the injected sample engagement.
+function persistable(s) {
+  return { ...s, engagements: (s.engagements || []).filter((e) => e.id !== 'sample') }
 }
 
 export function getState() {
   if (state === null) {
     state = read()
-    // Persist immediately so a migrated v1 store lands under the bumped
-    // key on first load, not on first mutation.
+    // Persist immediately so a migrated store lands under the bumped key
+    // on first load, not on first mutation.
     try {
-      if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(state))
+      if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(persistable(state)))
     } catch {
       // quota/privacy failure: in-memory state still works
     }
@@ -42,10 +64,10 @@ export function getState() {
 export function update(fn) {
   state = fn(getState())
   try {
-    localStorage.setItem(KEY, JSON.stringify(state))
+    localStorage.setItem(KEY, JSON.stringify(persistable(state)))
   } catch {
     // Quota or privacy-mode failure: state still updates in memory; the
-    // Engagements view surfaces persistence status.
+    // settings view surfaces persistence status.
   }
   listeners.forEach((l) => l())
 }
@@ -103,8 +125,12 @@ export function registryEntity(kind, id) {
 
 // --- site & circuit operations (active engagement) ---
 
+// The sample engagement is read-only: mutations targeting it are no-ops.
 function withActiveEngagement(s, fn) {
-  return { ...s, engagements: s.engagements.map((e) => (e.id === s.active_engagement_id ? fn(e) : e)) }
+  return {
+    ...s,
+    engagements: s.engagements.map((e) => (e.id === s.active_engagement_id && !e.sample ? fn(e) : e)),
+  }
 }
 
 export function addSite(name, address, coords) {
@@ -186,6 +212,66 @@ export function savePair(pair) {
   )
 }
 
+// --- element graph write API (spine §3) ---
+
+// The sample engagement is read-only; graph mutations refuse to touch it.
+export function isSampleActive(s) {
+  const e = activeEngagement(s || getState())
+  return !!(e && e.sample)
+}
+
+// Mint or match an element into the registry namespace by canonical key.
+// Free-text creation is forbidden — returns {ok:false} with a reason.
+export function graphMintElement(typeId, rawValue, label) {
+  const r = mintElement(getState().registry.elements || {}, typeId, rawValue, label)
+  if (r.ok && !r.existed) {
+    update((s) => ({ ...s, registry: { ...s.registry, elements: { ...(s.registry.elements || {}), [r.id]: r.element } } }))
+  }
+  return r
+}
+
+export function graphAddService(siteId, name) {
+  const svc = { id: uid('svc'), site_id: siteId, name: name || 'Service' }
+  update((s) => withActiveEngagement(s, (e) => ({ ...e, services: [...(e.services || []), svc] })))
+  return svc
+}
+
+export function graphAddEdge(from, to, kind) {
+  const edge = { id: uid('edge'), kind: kind || 'traverses', from, to }
+  update((s) => withActiveEngagement(s, (e) => {
+    const dup = (e.edges || []).some((x) => x.kind === edge.kind && x.from === from && x.to === to)
+    return dup ? e : { ...e, edges: [...(e.edges || []), edge] }
+  }))
+  return edge
+}
+
+// Capture a fact — no naked facts. Throws with the validation reason when
+// source / provenance / date are missing, so the caller surfaces it.
+export function captureFact(subjectType, subjectId, dimension, payload) {
+  const fact = makeFact(uid('fact'), subjectType, subjectId, dimension, payload)
+  const err = validateFact(fact)
+  if (err) throw new Error(err)
+  update((s) => withActiveEngagement(s, (e) => ({ ...e, facts: [...(e.facts || []), fact] })))
+  return fact
+}
+
+export function adjudicateFact(factId, adjudication) {
+  update((s) => withActiveEngagement(s, (e) => ({
+    ...e,
+    facts: (e.facts || []).map((f) => (f.id === factId ? { ...f, adjudication } : f)),
+  })))
+}
+
+// Accept a collision finding: write the confirmed shared-fate relation to
+// the registry — the compounding cross-engagement asset.
+export function acceptCollision(finding, evidenceRef, date) {
+  const eng = activeEngagement(getState())
+  if (!eng || eng.sample) return null
+  const rel = makeSharedFateRelation(finding, evidenceRef, eng.id, date || new Date().toISOString().slice(0, 10))
+  update((s) => ({ ...s, registry: { ...s.registry, sharedFate: [...(s.registry.sharedFate || []), rel] } }))
+  return rel
+}
+
 // --- export / import ---
 
 // Full-engagement export: the engagement plus the entire registry, so the
@@ -193,7 +279,7 @@ export function savePair(pair) {
 export function exportEngagement(id) {
   const s = getState()
   const engagement = s.engagements.find((e) => e.id === id)
-  if (!engagement) return null
+  if (!engagement || engagement.sample) return null // sample is excluded from export
   return JSON.stringify(
     { type: 'devarix-engagement', schema_version: s.schema_version, registry: s.registry, engagement },
     null,

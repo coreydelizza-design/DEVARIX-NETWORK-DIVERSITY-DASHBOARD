@@ -11,12 +11,14 @@
 
 import { clliTable } from './circuitParser'
 import { upgradeEngagement } from './evidenceModel'
+import { deriveGraphForState } from './migrateGraph'
 
 export { transportMediums, serviceTypes } from './transportMediums'
 
-// v2: pair-layer grade records became unified {outcome, provenance}
-// evidence records (see evidenceModel.js); v1 stores migrate losslessly.
-export const SCHEMA_VERSION = 2
+// v2: pair-layer grade records became unified {outcome, provenance}.
+// v3: the L1-L3 element graph — services, elements (registry-namespaced),
+// edges, and facts — derived additively from existing data.
+export const SCHEMA_VERSION = 3
 
 // The seven infrastructure layers every circuit pair is graded on.
 export const LAYERS = [
@@ -29,7 +31,8 @@ export const LAYERS = [
   { id: 'logical', label: 'Logical' },
 ]
 
-// Canonical entity kinds in the registry namespace.
+// Canonical entity kinds in the registry namespace. `elements` (a map)
+// and `sharedFate` (relations) are added in v3 and handled separately.
 export const REGISTRY_KINDS = ['clli', 'asn', 'carrier', 'accessVendor', 'nniId', 'routeSegment', 'pop']
 
 export function normalizeKey(s) {
@@ -61,6 +64,10 @@ export function makeEngagement(name, clientName) {
     pairs: [],
     documents: {},
     requests: [],
+    // v3 element graph (engagement-scoped; elements live in the registry)
+    services: [],
+    edges: [],
+    facts: [],
   }
 }
 
@@ -156,6 +163,10 @@ export function emptyState() {
   Object.entries(clliTable).forEach(([code, place]) =>
     registry.clli.push(makeRegistryEntity('clli', code, `${code} · ${place}`, { place }))
   )
+  // v3 graph namespaces: elements (engagement-independent, canonical-key
+  // deduped) and confirmed shared-fate relations (the compounding asset).
+  registry.elements = {}
+  registry.sharedFate = []
   return { schema_version: SCHEMA_VERSION, registry, engagements: [], active_engagement_id: null }
 }
 
@@ -164,6 +175,7 @@ export function emptyState() {
 // stepwise on next load instead of being discarded.
 const MIGRATIONS = {
   1: (s) => ({ ...s, engagements: (s.engagements || []).map(upgradeEngagement) }),
+  2: (s) => deriveGraphForState(s),
 }
 
 export function migrate(state) {
